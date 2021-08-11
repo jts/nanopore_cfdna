@@ -7,11 +7,11 @@ process merge_reads {
     input: 
         file "run_directory"
     output:
-        file "merged_reads/all.fastq"
+        file "merged_reads/${params.output}.fastq"
     shell:
     """
     mkdir -p merged_reads
-    fastcat -x run_directory > merged_reads/all.fastq
+    fastcat -x run_directory > merged_reads/${params.output}.fastq
     """
 }
 
@@ -29,76 +29,76 @@ process basecall_reads {
 
 process align_reads {
     cpus params.threads
-    publishDir "$params.output", mode: 'copy'
+    publishDir "${params.output}_results", mode: 'copy'
     input:
-        file "reads.fastq"
+        file "${params.output}.fastq"
     output:
-        file "aligned.sorted.bam"
+        file "${params.output}.sorted.bam"
     shell:
     """
-    minimap2 -ax map-ont -t $task.cpus $params.reference reads.fastq | samtools sort -T tmp > aligned.sorted.bam
+    minimap2 -ax map-ont -t $task.cpus $params.reference ${params.output}.fastq | samtools sort -T tmp > ${params.output}.sorted.bam
     """
 }
 
 process index_bam {
     input:
-        file "aligned.sorted.bam"
+        file "${params.output}.sorted.bam"
     output:
-        file "aligned.sorted.bam.bai"
+        file "${params.output}.sorted.bam.bai"
     shell:
     """
-    samtools index aligned.sorted.bam
+    samtools index ${params.output}.sorted.bam
     """
 }
 
 process nanopolish_index {
     cpus params.threads
     input:
-        file "reads.fastq"
+        file "${params.output}.fastq"
         file "sequencing_summary.txt"
         file "run_directory"
     output:
-        file "reads.fastq.index"
-        file "reads.fastq.index.gzi"
-        file "reads.fastq.index.fai"
-        file "reads.fastq.index.readdb"
+        file "${params.output}.fastq.index"
+        file "${params.output}.fastq.index.gzi"
+        file "${params.output}.fastq.index.fai"
+        file "${params.output}.fastq.index.readdb"
     shell:
     """
-    $params.nanopolish index -s sequencing_summary.txt -d run_directory reads.fastq
+    $params.nanopolish index -s sequencing_summary.txt -d run_directory ${params.output}.fastq
     """
 
 }
 
 process nanopolish_call_methylation {
     cpus params.threads
-    publishDir "$params.output", mode: 'copy'
+    publishDir "${params.output}_results", mode: 'copy'
 
     input:
-        file "reads.fastq"
-        file "aligned.sorted.bam"
-        file "aligned.sorted.bam.bai"
+        file "${params.output}.fastq"
+        file "${params.output}.sorted.bam"
+        file "${params.output}.sorted.bam.bai"
         file "run_directory"
-        file "reads.fastq.index"
-        file "reads.fastq.index.gzi"
-        file "reads.fastq.index.fai"
-        file "reads.fastq.index.readdb"
+        file "${params.output}.fastq.index"
+        file "${params.output}.fastq.index.gzi"
+        file "${params.output}.fastq.index.fai"
+        file "${params.output}.fastq.index.readdb"
     output:
-        file "aligned.sorted.modifications.bam"
+        file "${params.output}.modifications.sorted.bam"
     shell:
     """
-    $params.nanopolish call-methylation -b aligned.sorted.bam -r reads.fastq -g $params.reference --modbam-output aligned.sorted.modifications.bam -t $task.cpus
+    $params.nanopolish call-methylation -b ${params.output}.sorted.bam -r ${params.output}.fastq -g $params.reference --modbam-output ${params.output}.modifications.sorted.bam -t $task.cpus
     """
 }
 
 process run_nanoplot_bam {
-    publishDir "$params.output", mode: 'copy'
+    publishDir "${params.output}_results", mode: 'copy'
     input:
-        file "aligned.sorted.bam"
+        file "${params.output}.sorted.bam"
     output:
         file "nanoplot_bam"
     shell:
     """
-    NanoPlot --bam aligned.sorted.bam -o nanoplot_bam
+    NanoPlot --bam ${params.output}.sorted.bam -o nanoplot_bam
     """
 }
 
