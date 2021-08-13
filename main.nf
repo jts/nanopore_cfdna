@@ -4,6 +4,9 @@
 nextflow.enable.dsl = 2
 
 process merge_reads {
+    cpus 1
+    memory '1 G'
+
     input: 
         file "run_directory"
     output:
@@ -16,6 +19,13 @@ process merge_reads {
 }
 
 process basecall_reads {
+    label 'GPU'
+
+    memory '16 G'
+    cpus params.threads
+    time '3d'
+    queue 'gpu.q'
+
     input:
         file "run_directory"
     output:
@@ -23,12 +33,14 @@ process basecall_reads {
         file "basecalled/sequencing_summary.txt"
     shell:
     """
-    $params.guppy -r --num_callers 8 --gpu_runners_per_device 4 --chunks_per_runner 512 -c dna_r9.4.1_450bps_hac.cfg -i run_directory -x "cuda:0 cuda:1" -s basecalled
+    $params.guppy -r --num_callers $task.cpus --gpu_runners_per_device 4 --chunks_per_runner 512 -c dna_r9.4.1_450bps_hac.cfg -i run_directory -x "cuda:0 cuda:1" -s basecalled
     """
 }
 
 process align_reads {
     cpus params.threads
+    memory '32 G'
+
     publishDir "${params.output}_results", mode: 'copy'
     input:
         file "${params.output}.fastq"
@@ -41,6 +53,7 @@ process align_reads {
 }
 
 process index_bam {
+
     input:
         file "${params.output}.sorted.bam"
     output:
@@ -52,7 +65,9 @@ process index_bam {
 }
 
 process nanopolish_index {
-    cpus params.threads
+    time '1d'
+    memory '24 G'
+
     input:
         file "${params.output}.fastq"
         file "sequencing_summary.txt"
@@ -71,6 +86,9 @@ process nanopolish_index {
 
 process nanopolish_call_methylation {
     cpus params.threads
+    memory '32 G'
+    time '3d'
+    
     publishDir "${params.output}_results", mode: 'copy'
 
     input:
@@ -91,6 +109,8 @@ process nanopolish_call_methylation {
 }
 
 process run_nanoplot_bam {
+    memory '32 G'
+
     publishDir "${params.output}_results", mode: 'copy'
     input:
         file "${params.output}.sorted.bam"
