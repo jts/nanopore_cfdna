@@ -8,13 +8,14 @@ process merge_reads {
     memory '1 G'
 
     input: 
-        file "run_directory"
+        val sample_name
+        file basecall_directory
     output:
-        file "merged_reads/${params.output}.fastq"
+        file "merged_reads/${sample_name}.fastq"
     shell:
     """
     mkdir -p merged_reads
-    fastcat -x run_directory > merged_reads/${params.output}.fastq
+    fastcat -x ${basecall_directory} > merged_reads/${sample_name}.fastq
     """
 }
 
@@ -27,13 +28,15 @@ process basecall_reads {
     queue 'gpu.q'
 
     input:
-        file "run_directory"
+        tuple val(sample_name), file(run_directory)
     output:
-        file "basecalled"
-        file "basecalled/sequencing_summary.txt"
+        val sample_name, emit: sample_name
+        path run_directory, emit: run_directory
+        path "basecalled", emit: basecalled_directory
+        path "basecalled/sequencing_summary.txt", emit: sequencing_summary
     shell:
     """
-    $params.guppy -r --num_callers $task.cpus --gpu_runners_per_device 4 --chunks_per_runner 512 -c dna_r9.4.1_450bps_hac.cfg -i run_directory -x "cuda:0 cuda:1" -s basecalled
+    $params.guppy -r --num_callers $task.cpus --gpu_runners_per_device 4 --chunks_per_runner 512 -c dna_r9.4.1_450bps_hac.cfg -i $run_directory -x "cuda:0 cuda:1" -s basecalled
     """
 }
 
@@ -41,26 +44,17 @@ process align_reads {
     cpus params.threads
     memory '32 G'
 
-    publishDir "${params.output}_results", mode: 'copy'
+    publishDir "${sample_name}_results", mode: 'copy'
     input:
-        file "${params.output}.fastq"
+        val sample_name
+        file "${sample_name}.fastq"
     output:
-        file "${params.output}.sorted.bam"
+        path "${sample_name}.sorted.bam", emit: bam
+        path "${sample_name}.sorted.bam.bai", emit: bai
     shell:
     """
-    minimap2 -ax map-ont -t $task.cpus $params.reference ${params.output}.fastq | samtools sort -T tmp > ${params.output}.sorted.bam
-    """
-}
-
-process index_bam {
-
-    input:
-        file "${params.output}.sorted.bam"
-    output:
-        file "${params.output}.sorted.bam.bai"
-    shell:
-    """
-    samtools index ${params.output}.sorted.bam
+    minimap2 -ax map-ont -t $task.cpus $params.reference ${sample_name}.fastq | samtools sort -T tmp > ${sample_name}.sorted.bam
+    samtools index ${sample_name}.sorted.bam
     """
 }
 
@@ -69,17 +63,15 @@ process nanopolish_index {
     memory '24 G'
 
     input:
-        file "${params.output}.fastq"
+        val sample_name
+        file "${sample_name}.fastq"
         file "sequencing_summary.txt"
         file "run_directory"
     output:
-        file "${params.output}.fastq.index"
-        file "${params.output}.fastq.index.gzi"
-        file "${params.output}.fastq.index.fai"
-        file "${params.output}.fastq.index.readdb"
+        tuple file("${sample_name}.fastq.index"), file("${sample_name}.fastq.index.gzi"), file("${sample_name}.fastq.index.fai"), file("${sample_name}.fastq.index.readdb")
     shell:
     """
-    $params.nanopolish index -s sequencing_summary.txt -d run_directory ${params.output}.fastq
+    $params.nanopolish index -s sequencing_summary.txt -d run_directory ${sample_name}.fastq
     """
 
 }
@@ -89,80 +81,50 @@ process nanopolish_call_methylation {
     memory '32 G'
     time '3d'
     
-    publishDir "${params.output}_results", mode: 'copy'
+    publishDir "${sample_name}_results", mode: 'copy'
 
     input:
-        file "${params.output}.fastq"
-        file "${params.output}.sorted.bam"
-        file "${params.output}.sorted.bam.bai"
+        val sample_name
+        file "${sample_name}.fastq"
+        file "${sample_name}.sorted.bam"
+        file "${sample_name}.sorted.bam.bai"
         file "run_directory"
-        file "${params.output}.fastq.index"
-        file "${params.output}.fastq.index.gzi"
-        file "${params.output}.fastq.index.fai"
-        file "${params.output}.fastq.index.readdb"
+        tuple file("${sample_name}.fastq.index"), file("${sample_name}.fastq.index.gzi"), file("${sample_name}.fastq.index.fai"), file("${sample_name}.fastq.index.readdb")
     output:
-        file "${params.output}.modifications.sorted.bam"
+        file "${sample_name}.modifications.sorted.bam"
     shell:
     """
-    $params.nanopolish call-methylation -b ${params.output}.sorted.bam -r ${params.output}.fastq -g $params.reference --modbam-output ${params.output}.modifications.sorted.bam -t $task.cpus
-    """
-}
-
-process run_nanoplot_bam {
-    memory '32 G'
-
-    publishDir "${params.output}_results", mode: 'copy'
-    input:
-        file "${params.output}.sorted.bam"
-    output:
-        file "nanoplot_bam"
-    shell:
-    """
-    NanoPlot --bam ${params.output}.sorted.bam -o nanoplot_bam
+    $params.nanopolish call-methylation -b ${sample_name}.sorted.bam -r ${sample_name}.fastq -g $params.reference --modbam-output ${sample_name}.modifications.sorted.bam -t $task.cpus
     """
 }
 
 workflow pipeline {
     take:
-        run_directory
+        input
     main:
-
+        
         if(params.rebasecall) {
-            basecall_output = basecall_reads(run_directory)
-            basecalled_directory = basecall_output[0]
-            sequencing_summary = basecall_output[1]
+            basecall_output = basecall_reads(input)
+            //basecalled_directory = basecall_output[0]
+            //sequencing_summary = basecall_output[1]
         } else {
             basecalled_directory = run_directory
             sequencing_summary = file("${params.run_directory}/**_sequencing_summary.txt", type: 'file')
         }
-
-        merged_fastq = merge_reads(basecalled_directory)
-        np_index = nanopolish_index(merged_fastq, sequencing_summary, run_directory)
-
-        bam = align_reads(merged_fastq)
-        bai = index_bam(bam)
-        modbam = nanopolish_call_methylation(merged_fastq, bam, bai, run_directory, np_index)
-        nanoplot_bam = run_nanoplot_bam(bam)
+        
+        merge_fastq_output = merge_reads(basecall_output.sample_name, basecall_output.basecalled_directory)
+        index_output = nanopolish_index(basecall_output.sample_name, merge_fastq_output, basecall_output.sequencing_summary, basecall_output.run_directory)
+        align_output = align_reads(basecall_output.sample_name, merge_fastq_output)
+        modbam = nanopolish_call_methylation(basecall_output.sample_name, merge_fastq_output, align_output.bam, align_output.bai, basecall_output.run_directory, index_output)
 }
 
 workflow {
 
-    if(!params.run_directory) {
-        log.info """
-Error, no run directory provided
-        """
-        exit 1
-    }
+    runs = Channel.fromPath( 'data/*', type: 'dir')
 
-    // if the user does not provide a sample name, create one based on the input directory
-    if(!params.sample_name) {
-        rd = file(params.run_directory)
-        params.output = rd.simpleName
-    } else {
-        params.output = params.sample_name
-    }
+    // determine sample name for each input
+    input = runs.map { [it.simpleName, it] }
+    input.view()
 
-    reads = Channel.fromPath(params.run_directory, type: 'dir', checkIfExists: true)
-    results = pipeline(reads)
-    // output(results)
+    pipeline(input)
 }
