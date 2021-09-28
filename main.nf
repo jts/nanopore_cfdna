@@ -91,10 +91,29 @@ process nanopolish_call_methylation {
         file "run_directory"
         tuple file("${sample_name}.fastq.index"), file("${sample_name}.fastq.index.gzi"), file("${sample_name}.fastq.index.fai"), file("${sample_name}.fastq.index.readdb")
     output:
-        file "${sample_name}.modifications.sorted.bam"
+        val sample_name, emit: sample_name
+        path "${sample_name}.modifications.sorted.bam", emit: modbam
     shell:
     """
     $params.nanopolish call-methylation -b ${sample_name}.sorted.bam -r ${sample_name}.fastq -g $params.reference --modbam-output ${sample_name}.modifications.sorted.bam -t $task.cpus
+    """
+}
+
+process calculate_read_modification_frequency {
+    cpus params.threads
+    memory '32 G'
+    time '1d'
+    
+    publishDir "${sample_name}_results", mode: 'copy'
+
+    input:
+        val sample_name
+        file "${sample_name}.modifications.sorted.bam"
+    output:
+        file "${sample_name}.read_modifications.tsv"
+    shell:
+    """
+    $params.mbtools read-frequency ${sample_name}.modifications.sorted.bam > ${sample_name}.read_modifications.tsv
     """
 }
 
@@ -115,7 +134,8 @@ workflow pipeline {
         merge_fastq_output = merge_reads(basecall_output.sample_name, basecall_output.basecalled_directory)
         index_output = nanopolish_index(basecall_output.sample_name, merge_fastq_output, basecall_output.sequencing_summary, basecall_output.run_directory)
         align_output = align_reads(basecall_output.sample_name, merge_fastq_output)
-        modbam = nanopolish_call_methylation(basecall_output.sample_name, merge_fastq_output, align_output.bam, align_output.bai, basecall_output.run_directory, index_output)
+        modbam_output = nanopolish_call_methylation(basecall_output.sample_name, merge_fastq_output, align_output.bam, align_output.bai, basecall_output.run_directory, index_output)
+        read_frequency_output = calculate_read_modification_frequency(modbam_output.sample_name, modbam_output.modbam)
 }
 
 workflow {
