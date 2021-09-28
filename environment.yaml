@@ -1,0 +1,15 @@
+name: cfdna
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  - nanoplot
+  - nextflow
+  - fastcat
+  - samtools
+  - minimap2
+  - pomoxis
+  - r
+  - bioconductor-karyoploter
+prefix: /u/jsimpson/miniconda3/envs/cfdna
