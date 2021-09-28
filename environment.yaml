@@ -1,5 +1,6 @@
 name: cfdna
 channels:
+  - epi2melabs
   - conda-forge
   - bioconda
   - defaults
