@@ -110,10 +110,29 @@ process calculate_read_modification_frequency {
         val sample_name
         file "${sample_name}.modifications.sorted.bam"
     output:
-        file "${sample_name}.read_modifications.tsv"
+        val sample_name, emit: sample_name
+        path "${sample_name}.read_modifications.tsv", emit: readmod
     shell:
     """
     $params.mbtools read-frequency ${sample_name}.modifications.sorted.bam > ${sample_name}.read_modifications.tsv
+    """
+}
+
+process calculate_fragmentation {
+    cpus params.threads
+    memory '32 G'
+    time '1d'
+    
+    publishDir "${sample_name}_results", mode: 'copy'
+
+    input:
+        val sample_name
+        file "${sample_name}.read_modifications.tsv"
+    output:
+        file "${sample_name}.fragmentation.ratios.bed"
+    shell:
+    """
+    python $params.fragmentation -o ${sample_name}.fragmentation.ratios.bed -s 100 151 -l 151 221 -b 500000 ${sample_name}.read_modifications.tsv
     """
 }
 
@@ -136,6 +155,7 @@ workflow pipeline {
         align_output = align_reads(basecall_output.sample_name, merge_fastq_output)
         modbam_output = nanopolish_call_methylation(basecall_output.sample_name, merge_fastq_output, align_output.bam, align_output.bai, basecall_output.run_directory, index_output)
         read_frequency_output = calculate_read_modification_frequency(modbam_output.sample_name, modbam_output.modbam)
+        fragmentation_output = calculate_fragmentation(read_frequency_output.sample_name, read_frequency_output.readmod)
 }
 
 workflow {
