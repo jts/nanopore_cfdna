@@ -18,7 +18,6 @@ process merge_reads {
     fastcat -x ${basecall_directory} > merged_reads/${sample_name}.fastq
     """
 }
-
 process basecall_reads {
     label 'GPU'
 
@@ -36,10 +35,9 @@ process basecall_reads {
         path "basecalled/sequencing_summary.txt", emit: sequencing_summary
     shell:
     """
-    $params.guppy -r --num_callers $task.cpus --gpu_runners_per_device 4 --chunks_per_runner 512 -c dna_r9.4.1_450bps_hac.cfg -i $run_directory -x "cuda:0 cuda:1" -s basecalled
+    $params.guppy -r --num_callers $task.cpus --gpu_runners_per_device 4 --chunks_per_runner 512 -c res_dna_r9.4.1_e8.1_hac_v033.cfg -d $params.reriomodels -i $run_directory -x "cuda:0 cuda:1" -s basecalled
     """
 }
-
 process align_reads {
     cpus params.threads
     memory '32 G'
@@ -57,7 +55,23 @@ process align_reads {
     samtools index ${sample_name}.sorted.bam
     """
 }
+process bam_stats {
+    memory '32 G'
+    time '1d'
 
+    publishDir "${sample_name}_results", mode: 'copy'
+
+    input:
+        val sample_name
+        file "${sample_name}.sorted.bam"
+        file "${sample_name}.sorted.bam.bai"
+    output:
+        path "${sample_name}.bamstats.tsv", emit: stats
+    shell:
+    """
+    stats_from_bam ${sample_name}.sorted.bam -o ${sample_name}.bamstats.tsv
+    """
+}
 process nanopolish_index {
     time '1d'
     memory '24 G'
@@ -73,9 +87,7 @@ process nanopolish_index {
     """
     $params.nanopolish index -s sequencing_summary.txt -d run_directory ${sample_name}.fastq
     """
-
 }
-
 process nanopolish_call_methylation {
     cpus params.threads
     memory '32 G'
@@ -95,10 +107,10 @@ process nanopolish_call_methylation {
         path "${sample_name}.modifications.sorted.bam", emit: modbam
     shell:
     """
+    export HDF5_PLUGIN_PATH=/.mounts/labs/simpsonlab/users/jsimpson/code/cfdna_pipeline/etc/
     $params.nanopolish call-methylation -b ${sample_name}.sorted.bam -r ${sample_name}.fastq -g $params.reference --modbam-output ${sample_name}.modifications.sorted.bam -t $task.cpus
     """
 }
-
 process calculate_read_modification_frequency {
     cpus params.threads
     memory '32 G'
@@ -117,6 +129,24 @@ process calculate_read_modification_frequency {
     $params.mbtools read-frequency ${sample_name}.modifications.sorted.bam > ${sample_name}.read_modifications.tsv
     """
 }
+process calculate_reference_frequency {
+    cpus params.threads
+    memory '32 G'
+    time '1d'
+    
+    publishDir "${sample_name}_results", mode: 'copy'
+
+    input:
+        val sample_name
+        file "${sample_name}.modifications.sorted.bam"
+    output:
+        val sample_name, emit: sample_name
+        path "${sample_name}.reference_modifications.tsv", emit: readmod
+    shell:
+    """
+    $params.mbtools reference-frequency ${sample_name}.modifications.sorted.bam > ${sample_name}.reference_modifications.tsv
+    """
+}
 
 process calculate_fragmentation {
     cpus params.threads
@@ -129,10 +159,11 @@ process calculate_fragmentation {
         val sample_name
         file "${sample_name}.read_modifications.tsv"
     output:
-        file "${sample_name}.fragmentation.ratios.bed"
+        file "${sample_name}.fragmentation.ratios.tsv"
     shell:
     """
-    python $params.fragmentation -o ${sample_name}.fragmentation.ratios.bed -s 100 151 -l 151 221 -b 500000 ${sample_name}.read_modifications.tsv
+    python $params.fragmentation -o ${sample_name}.fragmentation.ratios.tsv -s 100 151 -l 151 221 -b 5000000 ${sample_name}.read_modifications.tsv
+
     """
 }
 
@@ -140,22 +171,53 @@ workflow pipeline {
     take:
         input
     main:
-        
         if(params.rebasecall) {
             basecall_output = basecall_reads(input)
             //basecalled_directory = basecall_output[0]
             //sequencing_summary = basecall_output[1]
         } else {
-            basecalled_directory = run_directory
-            sequencing_summary = file("${params.run_directory}/**_sequencing_summary.txt", type: 'file')
+            basecall_output = input
+            sequencing_summary = file("${input}/**_sequencing_summary.txt", type: 'file')
         }
-        
-        merge_fastq_output = merge_reads(basecall_output.sample_name, basecall_output.basecalled_directory)
-        index_output = nanopolish_index(basecall_output.sample_name, merge_fastq_output, basecall_output.sequencing_summary, basecall_output.run_directory)
-        align_output = align_reads(basecall_output.sample_name, merge_fastq_output)
-        modbam_output = nanopolish_call_methylation(basecall_output.sample_name, merge_fastq_output, align_output.bam, align_output.bai, basecall_output.run_directory, index_output)
-        read_frequency_output = calculate_read_modification_frequency(modbam_output.sample_name, modbam_output.modbam)
-        fragmentation_output = calculate_fragmentation(read_frequency_output.sample_name, read_frequency_output.readmod)
+        merge_fastq_output = merge_reads(
+            basecall_output.sample_name,
+            basecall_output.basecalled_directory
+        )
+        index_output = nanopolish_index(
+            basecall_output.sample_name,
+            merge_fastq_output,
+            basecall_output.sequencing_summary,
+            basecall_output.run_directory
+        )
+        align_output = align_reads(
+            basecall_output.sample_name,
+            merge_fastq_output
+        )
+        bam_stats(
+            basecall_output.sample_name,
+            align_output.bam,
+            align_output.bai
+        )
+        modbam_output = nanopolish_call_methylation(
+            basecall_output.sample_name,
+            merge_fastq_output,
+            align_output.bam,
+            align_output.bai,
+            basecall_output.run_directory,
+            index_output
+        )
+        read_frequency_output = calculate_read_modification_frequency(
+            modbam_output.sample_name,
+            modbam_output.modbam
+        )
+        referency_frequency_output = calculate_reference_frequency(
+            modbam_output.sample_name,
+            modbam_output.modbam
+        )
+        fragmentation_output = calculate_fragmentation(
+            read_frequency_output.sample_name,
+            read_frequency_output.readmod
+        )
 }
 
 workflow {
