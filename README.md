@@ -5,6 +5,7 @@ This pipeline follows a suite of functions to compute fragmentation and methylat
 1. [Guppy](https://nanoporetech.com/nanopore-sequencing-data-analysis)
 2. [Nanopolish](https://github.com/jts/nanopolish)
 3. [mbtools](https://github.com/jts/mbtools)
+4. [Reriomodels](https://github.com/nanoporetech/rerio)
 
 ## Setup
 1. Install the environment with [Conda](https://docs.conda.io/en/latest/miniconda.html)
