@@ -2,6 +2,7 @@
 // Structure based on https://github.com/epi2me-labs/wf-template/blob/master/main.nf
 
 nextflow.enable.dsl = 2
+fragmentation = "$projectDir/fragmentation.py"
 
 process merge_reads {
     cpus 1
@@ -107,7 +108,6 @@ process nanopolish_call_methylation {
         path "${sample_name}.modifications.sorted.bam", emit: modbam
     shell:
     """
-    export HDF5_PLUGIN_PATH=/.mounts/labs/simpsonlab/users/jsimpson/code/cfdna_pipeline/etc/
     $params.nanopolish call-methylation -b ${sample_name}.sorted.bam -r ${sample_name}.fastq -g $params.reference --modbam-output ${sample_name}.modifications.sorted.bam -t $task.cpus
     """
 }
@@ -162,7 +162,7 @@ process calculate_fragmentation {
         file "${sample_name}.fragmentation.ratios.tsv"
     shell:
     """
-    python $params.fragmentation -o ${sample_name}.fragmentation.ratios.tsv -s 100 151 -l 151 221 -b 5000000 ${sample_name}.read_modifications.tsv
+    python $fragmentation -o ${sample_name}.fragmentation.ratios.tsv -s 100 151 -l 151 221 -b 5000000 ${sample_name}.read_modifications.tsv
 
     """
 }
@@ -171,14 +171,7 @@ workflow pipeline {
     take:
         input
     main:
-        if(params.rebasecall) {
-            basecall_output = basecall_reads(input)
-            //basecalled_directory = basecall_output[0]
-            //sequencing_summary = basecall_output[1]
-        } else {
-            basecall_output = input
-            sequencing_summary = file("${input}/**_sequencing_summary.txt", type: 'file')
-        }
+        basecall_output = basecall_reads(input)
         merge_fastq_output = merge_reads(
             basecall_output.sample_name,
             basecall_output.basecalled_directory
