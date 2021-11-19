@@ -2,7 +2,7 @@
 // Structure based on https://github.com/epi2me-labs/wf-template/blob/master/main.nf
 
 nextflow.enable.dsl = 2
-fragmentation = "$projectDir/fragmentation.py"
+fragmentation = "$projectDir/scripts/fragmentation.py"
 
 process merge_reads {
     cpus 1
