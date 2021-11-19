@@ -45,7 +45,7 @@ Then inside the data directory make symbolic links to the directories where the 
 cd data
 ln -s <PATH_TO_DATA>
 ```
-Then whilst in the run directory execute the nextflow script
+Then whilst in the run directory execute the nextflow script with the following command which takes as input the path to this repository.
 ```
 cd ..
 nextflow run <.../nanopore_cfdna/>
@@ -53,5 +53,12 @@ nextflow run <.../nanopore_cfdna/>
 If you have multiple cores available use the `--threads` parameter to specify how many you would like to use.
 
 ## Results
-The nextflow pipeline automatically creates a `work` directory and `results` directory for each sample. Inside the results directory you will find a file `sample.fragmentation_ratios.tsv`.
+The nextflow pipeline automatically creates a `work` directory and `results` directory for each sample. Inside the results directory you will:
+- `sample.fragmentation_ratios.tsv`: Ratio of short to long reads in 5Mb bins. More info [here](https://www.nature.com/articles/s41467-021-24994-w). Fragmentome can be plotted with `plot_fragmentome.r`
+- `sample.bamstats.tsv`: *Pomoxis* alignment statistics
+- `sample.read_modifications.tsv`: nanopolish methylation calling for reads
+- `sample.reference_modifications.tsv`: nanopolish methylation calling for each coordinate on the reference
+- `sample.cpgfreq.csv`: Modification frequency of CpG sites uses in methylation atlas deconvolution. Can be used as input [here](https://github.com/nloyfer/meth_atlas).
+- `sample.bam`: alignment against reference
+
 
