@@ -2,7 +2,7 @@
 // Structure based on https://github.com/epi2me-labs/wf-template/blob/master/main.nf
 
 nextflow.enable.dsl = 2
-fragmentation = "$projectDir/scripts/fragmentation.py"
+fragmentation = "${projectDir}/scripts/fragmentation.py"
 
 process merge_reads {
     cpus 1
@@ -141,7 +141,7 @@ process calculate_reference_frequency {
         file "${sample_name}.modifications.sorted.bam"
     output:
         val sample_name, emit: sample_name
-        path "${sample_name}.reference_modifications.tsv", emit: readmod
+        path "${sample_name}.reference_modifications.tsv", emit: refmod
     shell:
     """
     $params.mbtools reference-frequency ${sample_name}.modifications.sorted.bam > ${sample_name}.reference_modifications.tsv
@@ -164,6 +164,25 @@ process calculate_fragmentation {
     """
     python $fragmentation -o ${sample_name}.fragmentation.ratios.tsv -s 100 151 -l 151 221 -b 5000000 ${sample_name}.read_modifications.tsv
 
+    """
+}
+
+process get_cpgs {
+    cpus params.threads
+    memory '32 G'
+    time '1d'
+
+    publishDir launchDir, mode: 'copy'
+
+    input:
+        file(refmod)
+
+    output:
+        file "cpgfreq.csv"
+
+    shell:
+    """
+    python ${projectDir}/scripts/get_cpgs.py ${launchDir}/*results/*reference* -o cpgfreq.csv
     """
 }
 
@@ -203,7 +222,7 @@ workflow pipeline {
             modbam_output.sample_name,
             modbam_output.modbam
         )
-        referency_frequency_output = calculate_reference_frequency(
+        reference_frequency_output = calculate_reference_frequency(
             modbam_output.sample_name,
             modbam_output.modbam
         )
@@ -211,6 +230,8 @@ workflow pipeline {
             read_frequency_output.sample_name,
             read_frequency_output.readmod
         )
+    emit:
+        reference_frequency_output.refmod
 }
 
 workflow {
@@ -221,5 +242,7 @@ workflow {
     input = runs.map { [it.simpleName, it] }
     input.view()
 
-    pipeline(input)
+    refmods = pipeline(input)
+
+    get_cpgs(refmods)
 }
