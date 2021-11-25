@@ -42,7 +42,7 @@ def fill_NN(df_refmod, df_cpgloci):
 
     return df
 
-def join_df(df_cpgloci, refmods,
+def join_df(df_cpgloci, refmods, outfile,
             fill = True,
             offset=0,
             gDNA = False):
@@ -61,6 +61,9 @@ def join_df(df_cpgloci, refmods,
         column_map = {'chromosome':'chr',
                 'start': 'pos',
                 'methylated_frequency': 'freq'}
+    if fill:
+        f = open(f'{outfile}.log', 'w')
+        f.write('sample_name\tmissing_cpgs\tfilled_cpgs\n')
 
     for refmod in refmods:
         sample_name = refmod.split('_results')[0]
@@ -79,10 +82,15 @@ def join_df(df_cpgloci, refmods,
 
         print('Joining dataframes...')
         df = df.join(df_refmod, how='left')
-        if fill: print(f'{na_count - df.freq.isna().sum()} CpGs filled')
+        if fill:
+            na_filled = na_count - df.freq.isna().sum()
+            print(f'{na_filled} CpGs filled')
+            f.write(f'{sample_name}\t{na_count}\t{na_filled}\n')
+
         df.rename(columns={'freq':sample_name},
                             inplace=True)
 
+    if fill: f.close()
 
     return df.drop_duplicates()
 
@@ -93,17 +101,20 @@ def main():
     parser.add_argument('-o', help='output file')
     parser.add_argument('--gDNA', action='store_true')
     parser.add_argument('--fill', action='store_true')
+    parser.add_argument('--offset', type=int, default=0,
+                        help= '+1, -1 offset assistance')
     args = parser.parse_args()
 
     # Get location of cpg sites
-    print('loading CPG LOCI...')
+    print('Loading CPG LOCI...')
     df_cpgloci = pd.read_csv(CPG_LOCI)
     df_cpgloci = df_cpgloci.set_index(['chr', 'pos'])
     df_cpgloci = df_cpgloci.sort_index().drop_duplicates()
 
     # Get cpg modification frequency
     count = perf_counter()
-    df_result = join_df(df_cpgloci, args.refmods,
+    df_result = join_df(df_cpgloci, args.refmods, args.o,
+                        offset = args.offset,
                         gDNA = args.gDNA,
                         fill = args.fill)
     print(f'get_cpgfreq executed in {round(perf_counter()-count, 5)} seconds')
