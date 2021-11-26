@@ -228,7 +228,9 @@ workflow pipeline {
         input
     main:
         nanopolish_input = get_nanopolish_files(input)
-        chrs = Channel.of("chr1", "chr2", "chr3", 'chr4', 'chr5', 'chr6', 'chr7', 'chr8', 'chr9', 'chr10', 'chr11', 'chr12', 'chr13', 'chr14', 'chr15', 'chr16', 'chr17', 'chr18', 'chr19', 'chr20', 'chr21', 'chr22', 'chr23', "chrX", "chrY")
+        chrs = Channel.from(1 .. 22).map { "chr" + it }
+        chrs_sex = Channel.of("chrX", "chrY")
+        chrs = chrs.concat(chrs_sex)
         modbams = nanopolish_call_methylation(chrs,
                         nanopolish_input
                         )
