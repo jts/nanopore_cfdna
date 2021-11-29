@@ -183,7 +183,7 @@ process calculate_fragmentation {
         file "${sample_name}.fragmentation.ratios.tsv"
     shell:
     """
-    python $fragmentation -o ${sample_name}.fragmentation.ratios.tsv -s 100 151 -l 151 221 -b 5000000 ${sample_name}.read_modifications.tsv
+    python ${projectDir}/scripts/fragmentation.py -o ${sample_name}.fragmentation.ratios.tsv -s 100 151 -l 151 221 -b 5000000 ${sample_name}.read_modifications.tsv
     """
 }
 
@@ -216,10 +216,10 @@ process merge_bam {
         tuple( val(sample_name), val(bams) )
     output:
         val sample_name, emit: sample_name
-        path "${sample_name}.modifications.sorted.bam", emit: modbam
+        path "${sample_name}.merged.modifications.sorted.bam", emit: modbam
     shell:
     """
-    samtools merge ${bams.join(' ')} > ${sample_name}.modifications.sorted.bam
+    samtools merge -o ${sample_name}.merged.modifications.sorted.bam ${bams.join(' ')} --threads $params.threads
     """
 }
 
