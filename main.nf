@@ -2,7 +2,6 @@
 // Structure based on https://github.com/epi2me-labs/wf-template/blob/master/main.nf
 
 nextflow.enable.dsl = 2
-fragmentation = "${projectDir}/scripts/fragmentation.py"
 
 process merge_reads {
     cpus 1
@@ -94,21 +93,39 @@ process nanopolish_call_methylation {
     memory '32 G'
     time '3d'
     
-    publishDir "${sample_name}_results", mode: 'copy'
-
     input:
+        each chr
         val sample_name
         file "${sample_name}.fastq"
         file "${sample_name}.sorted.bam"
         file "${sample_name}.sorted.bam.bai"
         file "run_directory"
-        tuple file("${sample_name}.fastq.index"), file("${sample_name}.fastq.index.gzi"), file("${sample_name}.fastq.index.fai"), file("${sample_name}.fastq.index.readdb")
+        tuple file("${sample_name}.fastq.index"),
+            file("${sample_name}.fastq.index.gzi"),
+            file("${sample_name}.fastq.index.fai"),
+            file("${sample_name}.fastq.index.readdb")
     output:
-        val sample_name, emit: sample_name
-        path "${sample_name}.modifications.sorted.bam", emit: modbam
+        tuple( val(sample_name), path("${sample_name}.${chr}.modifications.sorted.bam"), emit: modbam)
     shell:
     """
-    $params.nanopolish call-methylation -b ${sample_name}.sorted.bam -r ${sample_name}.fastq -g $params.reference --modbam-output ${sample_name}.modifications.sorted.bam -t $task.cpus
+    $params.nanopolish call-methylation -b ${sample_name}*.bam -r ${sample_name}.fastq -g $params.reference -w ${chr} --modbam-output ${sample_name}.${chr}.modifications.sorted.bam -t $task.cpus
+    """
+}
+process merge_bam {
+    cpus params.threads
+    memory '32 G'
+    time '1d'
+    
+    publishDir "${sample_name}_results", mode: 'copy'
+
+    input:
+        tuple( val(sample_name), val(bams) )
+    output:
+        val sample_name, emit: sample_name
+        path "${sample_name}.merged.modifications.sorted.bam", emit: modbam
+    shell:
+    """
+    samtools merge -o ${sample_name}.merged.modifications.sorted.bam ${bams.join(' ')} --threads $params.threads
     """
 }
 process calculate_read_modification_frequency {
@@ -162,8 +179,7 @@ process calculate_fragmentation {
         file "${sample_name}.fragmentation.ratios.tsv"
     shell:
     """
-    python $fragmentation -o ${sample_name}.fragmentation.ratios.tsv -s 100 151 -l 151 221 -b 5000000 ${sample_name}.read_modifications.tsv
-
+    ${projectDir}/scripts/fragmentation.py -o ${sample_name}.fragmentation.ratios.tsv -s 100 151 -l 151 221 -b 5000000 ${sample_name}.read_modifications.tsv
     """
 }
 
@@ -171,18 +187,34 @@ process get_cpgs {
     cpus params.threads
     memory '32 G'
     time '1d'
-
     publishDir launchDir, mode: 'copy'
 
     input:
-        file(refmod)
+        val refmods
 
     output:
-        file "cpgfreq.csv"
+        file "cpgfreq.csv" 
 
     shell:
     """
-    python ${projectDir}/scripts/get_cpgs.py ${launchDir}/*results/*reference* -o cpgfreq.csv
+    ${projectDir}/scripts/get_cpgs.py ${refmods.join(' ')} -o cpgfreq.csv
+    """
+}
+process deconvolve {
+    cpus params.threads
+    memory '32 G'
+    time '1d'
+
+    publishDir launchDir, mode: 'copy'
+    
+    input:
+        file "cpgfreq.csv"
+    output:
+        file "cpgfreq_deconv_plot.png"
+        file "cpgfreq_deconv_output.csv"
+    shell:
+    """
+    ${params.deconvolve} cpgfreq.csv
     """
 }
 
@@ -210,14 +242,18 @@ workflow pipeline {
             align_output.bam,
             align_output.bai
         )
-        modbam_output = nanopolish_call_methylation(
-            basecall_output.sample_name,
-            merge_fastq_output,
-            align_output.bam,
-            align_output.bai,
-            basecall_output.run_directory,
-            index_output
-        )
+        chrs = Channel.from(1 .. 22).map { "chr" + it }
+        chrs_sex = Channel.of("chrX", "chrY")
+        chrs = chrs.concat(chrs_sex)
+        modbams = nanopolish_call_methylation(chrs,
+                        basecall_output.sample_name,
+                        merge_fastq_output,
+                        align_output.bam,
+                        align_output.bai,
+                        basecall_output.run_directory,
+                        index_output
+                        )
+        modbam_output = merge_bam(modbams.modbam.groupTuple())
         read_frequency_output = calculate_read_modification_frequency(
             modbam_output.sample_name,
             modbam_output.modbam
@@ -244,5 +280,7 @@ workflow {
 
     refmods = pipeline(input)
 
-    get_cpgs(refmods)
+    cpgs = get_cpgs(refmods.collect())
+    deconvolve(cpgs)
+
 }

@@ -63,7 +63,7 @@ def join_df(df_cpgloci, refmods,
                 'methylated_frequency': 'freq'}
 
     for refmod in refmods:
-        sample_name = refmod.split('_results')[0]
+        sample_name = refmod.split('/')[-1].split('.')[0]
         if gDNA: sample_name = refmod.split('/')[1]
         print(f'Loading {sample_name}...')
         df_refmod = pd.read_csv(refmod, sep='\t', usecols=columns)
