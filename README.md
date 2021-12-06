@@ -61,6 +61,7 @@ The nextflow pipeline automatically creates a `work` directory and `results` dir
 - `sample.read_modifications.tsv`: nanopolish methylation calling for reads
 - `sample.reference_modifications.tsv`: nanopolish methylation calling for each coordinate on the reference
 - `sample.bam`: alignment against reference
+
 In the launch directory you will find:
 - `cpgfreq.csv`: Modification frequency of CpG sites uses in methylation atlas deconvolution. Can be used as input [here](https://github.com/nloyfer/meth_atlas).
 - `cpgfreq_deconv_output.csv`: Methylation deconvolution output. Estimation of proportion of cell type heterogeneity for each sample.
