@@ -94,33 +94,30 @@ process get_nanopolish_files {
         tuple val(sample_name), file("run_directory")
     output:
         tuple val(sample_name),
-            path("**/${sample_name}.fastq.gz"),
-            path("**/${sample_name}.phased.bam"),
-            path("**/${sample_name}.phased.bam.bai"),
-            path("**/${sample_name}.fastq.gz.index"),
-            path("**/${sample_name}.fastq.gz.index.gzi"),
-            path("**/${sample_name}.fastq.gz.index.fai"),
-            path("**/${sample_name}.fastq.gz.index.readdb")
+            path("**/fastq/${sample_name}.fastq.gz"),
+            path("**/mapped/${sample_name}*.bam"),
+            path("**/mapped/${sample_name}*.bam.bai"),
+            path("**/fastq/${sample_name}.fastq.gz.index"),
+            path("**/fastq/${sample_name}.fastq.gz.index.gzi"),
+            path("**/fastq/${sample_name}.fastq.gz.index.fai"),
+            path("**/fastq/${sample_name}.fastq.gz.index.readdb")
     shell:
     """
     ls $run_directory/fastq/${sample_name}*
-    ls $run_directory/mapped/${sample_name}.phased.bam* 
+    ls $run_directory/mapped/${sample_name}*.bam* 
     """
 }
-
 process nanopolish_call_methylation {
     cpus params.threads
     memory '32 G'
     time '3d'
     
-    publishDir "${sample_name}_results", mode: 'copy'
-
     input:
         each chr
         tuple val(sample_name),
             path("${sample_name}.fastq.gz"),
-            path("${sample_name}.phased.bam"),
-            path("${sample_name}.phased.bam.bai"),
+            path("${sample_name}*.bam"),
+            path("${sample_name}*.bam.bai"),
             path("${sample_name}.fastq.gz.index"),
             path("${sample_name}.fastq.gz.index.gzi"),
             path("${sample_name}.fastq.gz.index.fai"),
@@ -129,7 +126,24 @@ process nanopolish_call_methylation {
         tuple( val(sample_name), path("${sample_name}.modifications.sorted.bam"), emit: modbam)
     shell:
     """
-    $params.nanopolish call-methylation -b ${sample_name}.phased.bam -r ${sample_name}.fastq.gz -g $params.reference -w ${chr} --modbam-output ${sample_name}.modifications.sorted.bam -t $task.cpus
+    $params.nanopolish call-methylation -b ${sample_name}*.bam -r ${sample_name}.fastq.gz -g $params.reference -w ${chr} --modbam-output ${sample_name}.${chr}.modifications.sorted.bam -t $task.cpus
+    """
+}
+process merge_bam {
+    cpus params.threads
+    memory '32 G'
+    time '1d'
+    
+    publishDir "${sample_name}_results", mode: 'copy'
+
+    input:
+        tuple( val(sample_name), val(bams) )
+    output:
+        val sample_name, emit: sample_name
+        path "${sample_name}.merged.modifications.sorted.bam", emit: modbam
+    shell:
+    """
+    samtools merge -o ${sample_name}.merged.modifications.sorted.bam ${bams.join(' ')} --threads $params.threads
     """
 }
 process calculate_read_modification_frequency {
@@ -160,12 +174,14 @@ process calculate_reference_frequency {
     input:
         val sample_name
         file "${sample_name}.modifications.sorted.bam"
+        val coverage
+        each target_coverage
     output:
         val sample_name, emit: sample_name
         path "${sample_name}.reference_modifications.tsv", emit: refmod
     shell:
     """
-    $params.mbtools reference-frequency ${sample_name}.modifications.sorted.bam > ${sample_name}.reference_modifications.tsv
+    $params.mbtools reference-frequency ${sample_name}.C${target_coverage}.modifications.sorted.bam > ${sample_name}.reference_modifications.tsv -C ${coverage} -D ${target_coverage}
     """
 }
 
@@ -205,21 +221,19 @@ process get_cpgs {
     python ${projectDir}/scripts/get_cpgs.py ${launchDir}/*results/*reference* -o cpgfreq.csv --fill
     """
 }
-process merge_bam {
+process calculate_coverage {
     cpus params.threads
-    memory '32 G'
+    memory '8 G'
     time '1d'
-    
-    publishDir "${sample_name}_results", mode: 'copy'
 
     input:
-        tuple( val(sample_name), val(bams) )
+        val sample_name
+        file "${sample_name}.sorted.bam"
     output:
-        val sample_name, emit: sample_name
-        path "${sample_name}.merged.modifications.sorted.bam", emit: modbam
+        val coverage
     shell:
     """
-    samtools merge -o ${sample_name}.merged.modifications.sorted.bam ${bams.join(' ')} --threads $params.threads
+    samtools coverage ${sample_name}.sorted.bam | head -n25 | tail -n24 | awk -F'\t' '{sum+=${7}} END {print(sum/NR) }'
     """
 }
 
@@ -235,13 +249,20 @@ workflow pipeline {
                         nanopolish_input
                         )
         modbam_output = merge_bam(modbams.modbam.groupTuple())
+        coverage = calculate_coverage(
+                    modbam_output.sample_name,
+                    modbam_output.modbam
+        )
         read_frequency_output = calculate_read_modification_frequency(
             modbam_output.sample_name,
             modbam_output.modbam
         )
+        cvrg = Channel.from([0.1, 0.5, 1, 5, 10, 15, 20, 25, 30, 40])
         reference_frequency_output = calculate_reference_frequency(
             modbam_output.sample_name,
-            modbam_output.modbam
+            modbam_output.modbam,
+            coverage,
+            cvrg
         )
         fragmentation_output = calculate_fragmentation(
             read_frequency_output.sample_name,
@@ -252,8 +273,7 @@ workflow pipeline {
 }
 
 workflow {
-
-    runs = Channel.fromPath( 'data/*', type: 'dir')
+    runs = Channel.fromPath( 'data/MMinden*', type: 'dir')
 
     // determine sample name for each input
     input = runs.map { [it.simpleName, it] }
