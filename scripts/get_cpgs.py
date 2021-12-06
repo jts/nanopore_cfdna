@@ -66,10 +66,12 @@ def join_df(df_cpgloci, refmods, outfile,
         f.write('sample_name\tmissing_cpgs\tfilled_cpgs\n')
 
     for refmod in refmods:
-        sample_name = refmod.split('_results')[0]
+        # sample_name = refmod.split('_results')[0]
+        sample_name = refmod.split('/')[-1].split('.')[0]
         if gDNA: sample_name = refmod.split('/')[1]
         print(f'Loading {sample_name}...')
-        df_refmod = pd.read_csv(refmod, sep='\t', usecols=columns)
+        df_refmod = pd.read_csv(refmod, sep='\t')#, usecols=columns)
+        print(df_refmod.head())
         df_refmod.rename(columns=column_map,
                             inplace=True)
         df_refmod['pos'] = df_refmod['pos'] + offset
