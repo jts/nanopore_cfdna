@@ -197,7 +197,7 @@ process get_cpgs {
 
     shell:
     """
-    ${projectDir}/scripts/get_cpgs.py ${refmods.join(' ')} -o cpgfreq.csv
+    ${projectDir}/scripts/get_cpgs.py ${refmods.join(' ')} -o cpgfreq.csv --fill
     """
 }
 process deconvolve {

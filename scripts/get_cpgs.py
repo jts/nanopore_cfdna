@@ -42,8 +42,8 @@ def fill_NN(df_refmod, df_cpgloci):
 
     return df
 
-def join_df(df_cpgloci, refmods,
-            fill_na = True,
+def join_df(df_cpgloci, refmods, outfile,
+            fill = True,
             offset=0,
             gDNA = False):
     """
@@ -61,9 +61,12 @@ def join_df(df_cpgloci, refmods,
         column_map = {'chromosome':'chr',
                 'start': 'pos',
                 'methylated_frequency': 'freq'}
+    if fill:
+        f = open(f'{outfile}.log', 'w')
+        f.write('sample_name\tmissing_cpgs\tfilled_cpgs\n')
 
     for refmod in refmods:
-        sample_name = refmod.split('/')[-1].split('.')[0]
+        sample_name = refmod.split('_results')[0]
         if gDNA: sample_name = refmod.split('/')[1]
         print(f'Loading {sample_name}...')
         df_refmod = pd.read_csv(refmod, sep='\t', usecols=columns)
@@ -71,13 +74,23 @@ def join_df(df_cpgloci, refmods,
                             inplace=True)
         df_refmod['pos'] = df_refmod['pos'] + offset
         df_refmod = df_refmod.set_index(['chr', 'pos'])
-        if fill_na:
+        if fill:
+            na_count = df.join(df_refmod, how='left').freq.isna().sum()
+            print(f'{na_count} NA CpGs found.\
+                    Filling NA by Nearest Neighbour...')
             df_refmod = fill_NN(df_refmod, df_cpgloci)
+
         print('Joining dataframes...')
         df = df.join(df_refmod, how='left')
+        if fill:
+            na_filled = na_count - df.freq.isna().sum()
+            print(f'{na_filled} CpGs filled')
+            f.write(f'{sample_name}\t{na_count}\t{na_filled}\n')
+
         df.rename(columns={'freq':sample_name},
                             inplace=True)
 
+    if fill: f.close()
 
     return df.drop_duplicates()
 
@@ -87,17 +100,23 @@ def main():
                         help='reference_modifications.tsv file')
     parser.add_argument('-o', help='output file')
     parser.add_argument('--gDNA', action='store_true')
+    parser.add_argument('--fill', action='store_true')
+    parser.add_argument('--offset', type=int, default=0,
+                        help= '+1, -1 offset assistance')
     args = parser.parse_args()
 
     # Get location of cpg sites
-    print('loading CPG LOCI...')
+    print('Loading CPG LOCI...')
     df_cpgloci = pd.read_csv(CPG_LOCI)
     df_cpgloci = df_cpgloci.set_index(['chr', 'pos'])
     df_cpgloci = df_cpgloci.sort_index().drop_duplicates()
 
     # Get cpg modification frequency
     count = perf_counter()
-    df_result = join_df(df_cpgloci, args.refmods, gDNA = args.gDNA)
+    df_result = join_df(df_cpgloci, args.refmods, args.o,
+                        offset = args.offset,
+                        gDNA = args.gDNA,
+                        fill = args.fill)
     print(f'get_cpgfreq executed in {round(perf_counter()-count, 5)} seconds')
     print(df_result.describe())
 
