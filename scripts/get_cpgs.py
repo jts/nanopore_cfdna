@@ -12,6 +12,7 @@ import pandas as pd
 import numpy as np
 from time import perf_counter
 from tqdm import tqdm
+import re
 
 script_dir = os.path.realpath(os.path.dirname(__file__))
 
@@ -66,11 +67,13 @@ def join_df(df_cpgloci, refmods, outfile,
         f.write('sample_name\tmissing_cpgs\tfilled_cpgs\n')
 
     for refmod in refmods:
-        # sample_name = refmod.split('_results')[0]
-        sample_name = refmod.split('/')[-1].split('.')[0]
+        sample_name = re.search('C\d*.*\dC', refmod)[0][1:-1]
         if gDNA: sample_name = refmod.split('/')[1]
         print(f'Loading {sample_name}...')
-        df_refmod = pd.read_csv(refmod, sep='\t')#, usecols=columns)
+        try:
+            df_refmod = pd.read_csv(refmod, sep='\t')#, usecols=columns)
+        except pd.errors.EmptyDataError:
+            continue
         print(df_refmod.head())
         df_refmod.rename(columns=column_map,
                             inplace=True)
