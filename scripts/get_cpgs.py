@@ -57,18 +57,13 @@ def join_df(df_cpgloci, refmods, outfile,
     column_map = {'chromosome':'chr',
                 'position': 'pos',
                 'modified_frequency': 'freq'}
-    if gDNA:
-        columns = ['chromosome', 'start', 'methylated_frequency']
-        column_map = {'chromosome':'chr',
-                'start': 'pos',
-                'methylated_frequency': 'freq'}
     if fill:
         f = open(f'{outfile}.log', 'w')
         f.write('sample_name\tmissing_cpgs\tfilled_cpgs\n')
 
     for refmod in refmods:
         sample_name = re.search('C\d*.*\dC', refmod)[0][1:-1]
-        if gDNA: sample_name = refmod.split('/')[1]
+        if sample_name in df.columns: continue
         print(f'Loading {sample_name}...')
         try:
             df_refmod = pd.read_csv(refmod, sep='\t')#, usecols=columns)

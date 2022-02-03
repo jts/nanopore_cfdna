@@ -206,36 +206,23 @@ process downsample_reference_frequency {
         fi
         """
 }
-process calculate_reference_frequency {
-    memory '32 G'
-    time '3d'
-
-    input:
-        val sample_name
-        file "${sample_name}.modifications.sorted.bam"
-        val coverage
-    output:
-        tuple (val(sample_name), path("${sample_name}.C${coverage as float}C.reference_modifications.tsv"), emit: refmod)
-    shell:
-        """
-        $params.mbtools reference-frequency ${sample_name}.modifications.sorted.bam > ${sample_name}.C${coverage as float}C.reference_modifications.tsv
-        """
-}
 process get_ref_freq_output {
 
     input:
+        val sample_name
+        val coverage
         each target_coverage
-        tuple val(sample_name), file("run_directory")
     output:
-        tuple (val(sample_name), path("${sample_name}.C${target_coverage}C.reference_modifications.tsv"), emit: refmod)
-    exec:
-    if (!(target_coverage instanceof Integer) && !(target_coverage instanceof BigDecimal) ){
-        target_coverage = Float.parseFloat(target_coverage)
-    }
+        tuple (val(sample_name), path("${sample_name}.C*C.reference_modifications.tsv"), emit: refmod)
     shell:
-    """
-    ln -s \$(ls \$(find $workDir -type f | grep ${sample_name}.C${target_coverage}C.reference_modifications.tsv) -lt | head -n1 | cut -f9 -d' ') ${sample_name}.C${target_coverage}C.reference_modifications.tsv
-    """
+    if (target_coverage < coverage as float)
+        """
+        ln -s \$(ls \$(find $workDir -type f -name "${sample_name}.C${target_coverage}C.reference_modifications.tsv") -t | head -n1) ${sample_name}.C${target_coverage}C.reference_modifications.tsv
+        """
+    else
+        """
+        ln -s \$(ls \$(find $workDir -type f -name "${sample_name}.C${coverage as float}C.reference_modifications.tsv") -t | head -n1) ${sample_name}.C${coverage as float}C.reference_modifications.tsv
+        """
 }
 process calculate_coverage {
     memory '8 G'
@@ -346,8 +333,9 @@ workflow pipeline {
                 /*))*/
             }
             else {
-                cvrg = cvrg.concat(coverage)
-                reference_frequency_output = get_ref_freq_output(cvrg, input)
+                reference_frequency_output = get_ref_freq_output(coverage.sample_name,
+                                                                 coverage.sample_coverage,
+                                                                 cvrg)
             }
         }
         cpgs = get_cpgs(reference_frequency_output.groupTuple())
