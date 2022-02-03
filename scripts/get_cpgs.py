@@ -84,6 +84,8 @@ def join_df(df_cpgloci, refmods, outfile,
             print(f'{na_count} NA CpGs found.\
                     Filling NA by Nearest Neighbour...')
             df_refmod = fill_NN(df_refmod, df_cpgloci)
+        else:
+            df_refmod = df_cpgloci.join(df_refmod, how='inner')['freq']
 
         print('Joining dataframes...')
         df = df.join(df_refmod, how='left')
