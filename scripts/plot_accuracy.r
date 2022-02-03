@@ -1,5 +1,6 @@
 #! /.mounts/labs/simpsonlab/sw/miniconda3/envs/cfdna/bin/Rscript
 library(ggplot2)
+library(glue)
 library(data.table)
 args = commandArgs(trailingOnly = TRUE)
 
@@ -37,15 +38,20 @@ for (arg in args){
 	df = data.frame(rbind(df, df2))
 }
 
+sample_name = tail(strsplit(args[1], "/")[[1]], n=1)
+sample_name = sub('.cpgs_deconv_output.csv', '', sample_name)
 print(df)
 
 plot = ggplot(df, aes(x=coverage, y=corr, color=sample)) +
 	geom_point() +
-	geom_smooth(level=0.3, formula='y ~ log(x)') + 
+	geom_smooth(level=0.3, formula='y ~ log(x)', se=FALSE) + 
 
 	labs(title = "Pearson correlation of deconvolution output vector with original sample and downsampled coverage",
 	     x = "Coverage",
 	     y = "Correlation to Original Sample")
 
-ggsave("coverageVaccuracy.png", width=10, height=8)
+write.table(df, file=glue("{sample_name}.coverageVaccuracy.tsv"),
+            sep='\t')
+
+ggsave(glue("{sample_name}.coverageVaccuracy.png"), width=10, height=8)
 
