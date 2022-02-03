@@ -117,7 +117,7 @@ process get_mergebam_output {
         path "${sample_name}.merged.modifications.sorted.bam", emit: modbam
     shell:
     """
-    ln -s \$(find $workDir -type f | grep ${sample_name}.merged.modifications.sorted.bam) ${sample_name}.merged.modifications.sorted.bam
+    ln -s \$(find $workDir -type f | grep ${sample_name}.merged.modifications.sorted.bam | tail -n1) ${sample_name}.merged.modifications.sorted.bam
     """
 }
 process get_nanopolish_output {
@@ -179,10 +179,9 @@ process clean_bams {
     rm \$(find -type f | grep modifications.sorted.bam | grep chr | grep ${sample_name})
     """
 }
-process calculate_reference_frequency {
+process downsample_reference_frequency {
     memory '32 G'
     time '2d'
-    
 
     input:
         val sample_name
@@ -190,11 +189,37 @@ process calculate_reference_frequency {
         val coverage
         each target_coverage
     output:
-        tuple (val(sample_name), path("${sample_name}.C${target_coverage}C.reference_modifications.tsv"), emit: refmod)
+        tuple (val(sample_name), path("${sample_name}.C*C.reference_modifications.tsv"), emit: refmod)
     shell:
-    """
-    $params.mbtools reference-frequency ${sample_name}.modifications.sorted.bam > ${sample_name}.C${target_coverage}C.reference_modifications.tsv -D ${target_coverage} -C ${coverage} 
-    """
+    if (target_coverage < coverage as float)
+        """
+        $params.mbtools reference-frequency ${sample_name}.modifications.sorted.bam > ${sample_name}.C${target_coverage}C.reference_modifications.tsv -D ${target_coverage} -C ${coverage} 
+        """
+    else
+        """
+        f=\$(find $workDir -type f -name "${sample_name}.C${coverage as float}C.reference_modifications.tsv")
+        if [ -z \$f ]
+        then
+            $params.mbtools reference-frequency ${sample_name}.modifications.sorted.bam > ${sample_name}.C${coverage as float}C.reference_modifications.tsv
+        else
+            touch ${sample_name}.C${target_coverage}C.reference_modifications.tsv
+        fi
+        """
+}
+process calculate_reference_frequency {
+    memory '32 G'
+    time '3d'
+
+    input:
+        val sample_name
+        file "${sample_name}.modifications.sorted.bam"
+        val coverage
+    output:
+        tuple (val(sample_name), path("${sample_name}.C${coverage as float}C.reference_modifications.tsv"), emit: refmod)
+    shell:
+        """
+        $params.mbtools reference-frequency ${sample_name}.modifications.sorted.bam > ${sample_name}.C${coverage as float}C.reference_modifications.tsv
+        """
 }
 process get_ref_freq_output {
 
@@ -203,9 +228,13 @@ process get_ref_freq_output {
         tuple val(sample_name), file("run_directory")
     output:
         tuple (val(sample_name), path("${sample_name}.C${target_coverage}C.reference_modifications.tsv"), emit: refmod)
+    exec:
+    if (!(target_coverage instanceof Integer) && !(target_coverage instanceof BigDecimal) ){
+        target_coverage = Float.parseFloat(target_coverage)
+    }
     shell:
     """
-    ln -s \$(find $workDir -type f | grep ${sample_name}.C${target_coverage}C.reference_modifications.tsv | head -n1) ${sample_name}.C${target_coverage}C.reference_modifications.tsv
+    ln -s \$(ls \$(find $workDir -type f | grep ${sample_name}.C${target_coverage}C.reference_modifications.tsv) -lt | head -n1 | cut -f9 -d' ') ${sample_name}.C${target_coverage}C.reference_modifications.tsv
     """
 }
 process calculate_coverage {
@@ -216,7 +245,9 @@ process calculate_coverage {
         val sample_name
         file "${sample_name}.sorted.bam"
     output:
-        stdout
+        val sample_name, emit: sample_name
+        path "${sample_name}.sorted.bam", emit: modbam
+        stdout emit: sample_coverage
     shell:
     """
     samtools coverage ${sample_name}.sorted.bam | head -n25 | tail -n24 | awk -F'\\t' '{sum+=\$7} END {print(sum/NR) }'
@@ -231,11 +262,14 @@ process get_cpgs {
         tuple(val(sample_name), val(refmods))
 
     output:
-        file "${sample_name}.cpgs.csv" 
+        val sample_name, emit: sample_name
+        path "${sample_name}_filled.cpgs.csv", emit: csvfilled 
+        path "${sample_name}.cpgs.csv", emit: csv
 
     shell:
     """
-    ${projectDir}/scripts/get_cpgs.py ${refmods.join(' ')} -o ${sample_name}.cpgs.csv --fill
+    ${projectDir}/scripts/get_cpgs.py ${refmods.join(' ')} -o ${sample_name}_filled.cpgs.csv --fill
+    ${projectDir}/scripts/get_cpgs.py ${refmods.join(' ')} -o ${sample_name}.cpgs.csv
     """
 }
 process deconvolve {
@@ -246,14 +280,17 @@ process deconvolve {
     publishDir "${sample_name}_results", mode: 'symlink'
     
     input:
-        val sample_name
+        val sample_name 
         file "${sample_name}.cpgs.csv"
+        file "${sample_name}_filled.cpgs.csv"
     output:
-        file "${sample_name}.cpgs_deconv_output.csv" 
+        tuple( path ("${sample_name}.cpgs_deconv_output.csv"), 
+               path("${sample_name}_filled.cpgs_deconv_output.csv")) 
         /*file "${sample_name}.cpgs_deconv_plot.png*/
     shell:
     """
     ${params.deconvolve} ${sample_name}.cpgs.csv
+    ${params.deconvolve} ${sample_name}_filled.cpgs.csv
     """
 }
 process plot_accuracy {
@@ -263,7 +300,8 @@ process plot_accuracy {
     input:
         val deconv_output
     output:
-        file "coverageVaccuracy.png"
+        file "*coverageVaccuracy.png"
+        file "*coverageVaccuracy.tsv"
     shell:
     """
     ${projectDir}/scripts/plot_accuracy.r ${deconv_output.join(' ')}
@@ -276,8 +314,7 @@ workflow pipeline {
         chrs = Channel.from(1 .. 22).map { "chr" + it }
         chrs_sex = Channel.of("chrX", "chrY")
         chrs = chrs.concat(chrs_sex)
-        cvrg = Channel.from([0.1, 0.5, 1, 5, 10, 15, 20, 25, 30, 40])
-        sample_names = input.map { it[0] }
+        cvrg = Channel.from([0.1, 0.5, 1, 2, 5, 10, 50])
         if (params.call_nanopolish) {
             nanopolish_input = get_nanopolish_input(input)
             modbams = nanopolish_call_methylation(chrs,
@@ -289,24 +326,33 @@ workflow pipeline {
             modbams = get_nanopolish_output(chrs, input) 
             modbam_output = merge_bam(modbams.modbam.groupTuple())
         }
-        else if (params.ref_freq){
+        else {
             modbam_output = get_mergebam_output(input)
             coverage = calculate_coverage(
 			    modbam_output.sample_name,
 			    modbam_output.modbam
             )
-            reference_frequency_output = calculate_reference_frequency(
-                modbam_output.sample_name,
-                modbam_output.modbam,
-                coverage,
+            if (params.ref_freq){
+            reference_frequency_output = downsample_reference_frequency(
+                coverage.sample_name,
+                coverage.modbam,
+                coverage.sample_coverage,
                 cvrg
-            )
+                )
+            /*reference_frequency_output = reference_frequency_output.concat(calculate_reference_frequency(*/
+                /*coverage.sample_name,*/
+                /*coverage.modbam,*/
+                /*coverage.sample_coverage*/
+                /*))*/
+            }
+            else {
+                cvrg = cvrg.concat(coverage)
+                reference_frequency_output = get_ref_freq_output(cvrg, input)
+            }
         }
-        else {
-            reference_frequency_output = get_ref_freq_output(cvrg, input)
-        }
-        cpgs = get_cpgs(reference_frequency_output.refmod.groupTuple())
-        deconv_output = deconvolve(sample_names, cpgs)
+        cpgs = get_cpgs(reference_frequency_output.groupTuple())
+        deconv_output = deconvolve(cpgs.sample_name, cpgs.csv, cpgs.csvfilled)
+        plot_accuracy(deconv_output)
         if (params.clean_bams) {
             clean_bams(modbam_output.sample_name)
         }
@@ -315,11 +361,9 @@ workflow pipeline {
 }
 
 workflow {
-    runs = Channel.fromPath( 'data/MMinden*', type: 'dir')
+    runs = Channel.fromPath( 'data/MMinden_*', type: 'dir')
 
     // determine sample name for each input
     input = runs.map { [it.simpleName, it] }
-    input.view()
     deconv_output = pipeline(input)
-    plot_accuracy(deconv_output.collect())
 }
