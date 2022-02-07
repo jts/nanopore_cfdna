@@ -110,10 +110,11 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--atlas', required=True, type=str)
     parser.add_argument('--input', required=True, type=str)
+    parser.add_argument('--model', default='llse', type=str, help='deconvolution model options: [nnml, llse]')
     args = parser.parse_args()
     print(args)
     atlas = ReferenceAtlas(args.atlas)
-    
+
     coverage = 10
     epsilon = 0.05
 
@@ -131,8 +132,9 @@ def main():
                     data[s][row['acc']] = float(row[s])
                 else:
                     data[s][row['acc']] = 0.0
-    
+
     # convert to Samples and run
+    Y = []
     for sn in sample_names:
         # get cpg frequenices in order of atlas
         xhat = [data[sn].get(cpg, 0.0) for cpg in atlas.cpg_ids]
@@ -140,13 +142,16 @@ def main():
         # fill in default coverage values (for now)
         t = [ coverage ] * len(xhat)
         m = [ int(t[i] * xhat[i]) for i in range(0, len(t)) ]
-        
-        s = Sample(sn, numpy.array(xhat), numpy.array(m), numpy.array(t))
-        y_nnls = fit_nnls_constrained(atlas, s)
-        y_llse = fit_llse(atlas, s, epsilon)
 
-        for (idx, ct) in enumerate(atlas.get_cell_types()):
-            print("%s\t%.3f\t%.3f" % (ct, y_nnls[idx], y_llse[idx]))
+        s = Sample(sn, numpy.array(xhat), numpy.array(m), numpy.array(t))
+        if args.model == 'nnls':
+            Y.append(fit_nnls_constrained(atlas, s))
+        else:
+            Y.append(fit_llse(atlas, s, epsilon))
+    # output
+    print(f"ct,{','.join([sn for sn in sample_names])}")
+    for (idx, ct) in enumerate(atlas.get_cell_types()):
+        print(f"{ct},{','.join([str(y[idx]) for y in Y])}")
 
 if __name__ == "__main__":
     main()
