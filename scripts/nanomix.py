@@ -108,7 +108,8 @@ def fit_nnls_constrained(atlas, sample):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--atlas', required=True, type=str)
+    parser.add_argument('--atlas', required=True, type=str,
+            default='/.mounts/labs/simpsonlab/users/jbroadbent/code/cfdna/nanopore_cfdna/atlases/meth_atlas.csv')
     parser.add_argument('--input', required=True, type=str)
     parser.add_argument('--model', default='llse', type=str, help='deconvolution model options: [nnml, llse]')
     args = parser.parse_args()
