@@ -250,12 +250,10 @@ process get_cpgs {
 
     output:
         val sample_name, emit: sample_name
-        path "${sample_name}_filled.cpgs.csv", emit: csvfilled 
         path "${sample_name}.cpgs.csv", emit: csv
 
     shell:
     """
-    ${projectDir}/scripts/get_cpgs.py ${refmods.join(' ')} -o ${sample_name}_filled.cpgs.csv --fill
     ${projectDir}/scripts/get_cpgs.py ${refmods.join(' ')} -o ${sample_name}.cpgs.csv
     """
 }
@@ -269,15 +267,14 @@ process deconvolve {
     input:
         val sample_name 
         file "${sample_name}.cpgs.csv"
-        file "${sample_name}_filled.cpgs.csv"
     output:
-        tuple( path ("${sample_name}.cpgs_deconv_output.csv"), 
-               path("${sample_name}_filled.cpgs_deconv_output.csv")) 
+        tuple( path ("${sample_name}_llse.cpgs_deconv_output.csv"), 
+               path("${sample_name}_nnls.cpgs_deconv_output.csv")) 
         /*file "${sample_name}.cpgs_deconv_plot.png*/
     shell:
     """
-    ${params.deconvolve} ${sample_name}.cpgs.csv
-    ${params.deconvolve} ${sample_name}_filled.cpgs.csv
+    ${params.deconvolve} --input ${sample_name}.cpgs.csv > "${sample_name}_llse.cpgs_deconv_output.csv"
+    ${params.deconvolve} --input ${sample_name}.cpgs.csv --model nnls > "${sample_name}_nnls.cpgs_deconv_output.csv"
     """
 }
 process plot_accuracy {
@@ -326,11 +323,6 @@ workflow pipeline {
                 coverage.sample_coverage,
                 cvrg
                 )
-            /*reference_frequency_output = reference_frequency_output.concat(calculate_reference_frequency(*/
-                /*coverage.sample_name,*/
-                /*coverage.modbam,*/
-                /*coverage.sample_coverage*/
-                /*))*/
             }
             else {
                 reference_frequency_output = get_ref_freq_output(coverage.sample_name,
@@ -339,7 +331,7 @@ workflow pipeline {
             }
         }
         cpgs = get_cpgs(reference_frequency_output.groupTuple())
-        deconv_output = deconvolve(cpgs.sample_name, cpgs.csv, cpgs.csvfilled)
+        deconv_output = deconvolve(cpgs.sample_name, cpgs.csv)
         plot_accuracy(deconv_output)
         if (params.clean_bams) {
             clean_bams(modbam_output.sample_name)
