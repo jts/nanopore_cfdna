@@ -3,55 +3,87 @@ library(ggplot2)
 library(glue)
 library(data.table)
 args = commandArgs(trailingOnly = TRUE)
-
-df = read.csv(args[1], row.names=1)
-
-print(head(df))
-
 remove_X <- function(s) {
 	as.numeric(sub('X', '', s))
 }
-#sample_name = sub('.cpgs_deconv_output.csv', '', args[1])
-#df = cor(df)
-#df <- data.frame(coverage = rownames(df),
-		 #corr = df[,1],
-		 #sample = sample_name)
-#df = data.frame(apply(df, 2, remove_X))
 
-df = data.frame()
-
-for (arg in args){
-    sample_name = tail(strsplit(arg, "/")[[1]], n=1)
-	sample_name = sub('.cpgs_deconv_output.csv', '', sample_name)
-	df2 = read.table(arg, row.names=1, sep=',')
-    # Order by descending coverage
-    tdf = transpose(df2)
-    df2 = transpose(tdf[order(-tdf$V1),])
-    colnames(df2) <- df2[1,]
-    df2 <- df2[-1,]
-	df2 = cor(df2)
-    print(df2)
-	df2 <- data.frame(coverage = rownames(df2),
-			  corr = df2[,1],
-			  sample = sample_name)
-	df2[,1:2] = (apply(df2[,1:2], 2, remove_X))
-	df = data.frame(rbind(df, df2))
+get_sn <- function(s){
+    sample_name = tail(strsplit(s, "/")[[1]], n=1)
+    sub('.cpgs_deconv_output.csv', '', sample_name)
 }
 
-sample_name = tail(strsplit(args[1], "/")[[1]], n=1)
-sample_name = sub('.cpgs_deconv_output.csv', '', sample_name)
+correlation <- function(args) {
+    df = data.frame()
+    for (arg in args){
+        sample_name = get_sn(arg)
+        df2 = read.table(arg, row.names=1, sep=',')
+
+        # Order by descending coverage
+        tdf = transpose(df2)
+        df2 = transpose(tdf[order(-tdf$V1),])
+        colnames(df2) <- df2[1,]
+        df2 <- df2[-1,]
+        df2 = cor(df2)
+        print(df2)
+        df2 <- data.frame(coverage = rownames(df2),
+                  acc = df2[,1],
+                  sample = sample_name)
+        df2[,1:2] = (apply(df2[,1:2], 2, remove_X))
+        df = data.frame(rbind(df, df2))
+    }
+}
+
+chi2 <- function(expected, observed){
+    sum = 0
+    for (i in 1:length(expected)) {
+        sum = sum + (observed[i]-expected[i])**2
+    }
+    print(sqrt(sum/length(expected)))
+    sum
+}
+
+chi_squared <-function(args) {
+    df = data.frame()
+    for (arg in args) {
+        sample_name = get_sn(arg)
+        df2 = read.table(arg, row.names=1, sep=',')
+
+        # Order by descending coverage
+        tdf = transpose(df2)
+        df2 = transpose(tdf[order(-tdf$V1),])
+        colnames(df2) <- df2[1,]
+        df2 <- df2[-1,]
+
+        expected = df2[,1]
+        df_chi = c()
+        print(df2)
+        for (j in 1:length(df2)){
+            df_chi[j] = chi2(expected, df2[,j])
+        }
+        print(df_chi)
+
+        df2 <- data.frame(coverage = colnames(df2),
+                  acc = df_chi,
+                  sample = sample_name)
+        df2[,1:2] = (apply(df2[,1:2], 2, remove_X))
+        df = data.frame(rbind(df, df2))
+    }
+    df
+}
+
+df = chi_squared(args)
 print(df)
-
-plot = ggplot(df, aes(x=coverage, y=corr, color=sample)) +
+sample_name = get_sn(args[1])
+plot = ggplot(df, aes(x=coverage, y=acc, color=sample)) +
 	geom_point() +
-	geom_smooth(level=0.3, formula='y ~ log(x)', se=FALSE) + 
+	geom_smooth(se=FALSE) + 
 
-	labs(title = "Pearson correlation of deconvolution output vector with original sample and downsampled coverage",
+	labs(title = "Standard Error of deconvolution output vector with original sample and downsampled coverage",
 	     x = "Coverage",
-	     y = "Correlation to Original Sample")
+	     y = "Average Error to Original Sample")
 
-write.table(df, file=glue("{sample_name}.coverageVaccuracy.tsv"),
+write.table(df, file=glue("{sample_name}.coverageVerror.tsv"),
             sep='\t')
 
-ggsave(glue("{sample_name}.coverageVaccuracy.png"), width=10, height=8)
+ggsave(glue("{sample_name}.coverageVerror.png"), width=10, height=8)
 
