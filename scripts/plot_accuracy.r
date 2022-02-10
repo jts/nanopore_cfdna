@@ -9,7 +9,9 @@ remove_X <- function(s) {
 
 get_sn <- function(s){
     sample_name = tail(strsplit(s, "/")[[1]], n=1)
-    sub('.cpgs_deconv_output.csv', '', sample_name)
+    sample_name = sub('.cpgs_deconv_output.csv', '', sample_name)
+    sample_name = tail(strsplot(sample_name, "_")[[1]], n=1)
+    sample_name
 }
 
 correlation <- function(args) {
@@ -78,12 +80,12 @@ plot = ggplot(df, aes(x=coverage, y=acc, color=sample)) +
 	geom_point() +
 	geom_smooth(se=FALSE) + 
 
-	labs(title = "Standard Error of deconvolution output vector with original sample and downsampled coverage",
+	labs(title = "Standard Deviation of deconvolution output vector with original sample and downsampled coverage",
 	     x = "Coverage",
 	     y = "Average Error to Original Sample")
 
 write.table(df, file=glue("{sample_name}.coverageVerror.tsv"),
             sep='\t')
 
-ggsave(glue("{sample_name}.coverageVerror.png"), width=10, height=8)
+ggsave(glue("{sample_name}.coverageVerror.png"), width=14, height=10)
 

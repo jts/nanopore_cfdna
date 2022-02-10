@@ -284,8 +284,8 @@ process plot_accuracy {
     input:
         val deconv_output
     output:
-        file "*coverageVaccuracy.png"
-        file "*coverageVaccuracy.tsv"
+        file "*coverageV*.png"
+        file "*coverageV*.tsv"
     shell:
     """
     ${projectDir}/scripts/plot_accuracy.r ${deconv_output.join(' ')}
@@ -332,7 +332,6 @@ workflow pipeline {
         }
         cpgs = get_cpgs(reference_frequency_output.groupTuple())
         deconv_output = deconvolve(cpgs.sample_name, cpgs.csv)
-        plot_accuracy(deconv_output)
         if (params.clean_bams) {
             clean_bams(modbam_output.sample_name)
         }
@@ -346,4 +345,7 @@ workflow {
     // determine sample name for each input
     input = runs.map { [it.simpleName, it] }
     deconv_output = pipeline(input)
+
+    plot_accuracy(deconv_output.collect())
+
 }
