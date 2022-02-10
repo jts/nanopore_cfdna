@@ -87,5 +87,5 @@ plot = ggplot(df, aes(x=coverage, y=acc, color=sample)) +
 write.table(df, file=glue("{sample_name}.coverageVerror.tsv"),
             sep='\t')
 
-ggsave(glue("{sample_name}.coverageVerror.png"), width=10, height=8)
+ggsave(glue("{sample_name}.coverageVerror.png"), width=14, height=10)
 
