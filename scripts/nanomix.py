@@ -9,6 +9,9 @@ import os
 from scipy.stats import binom
 from scipy.optimize import minimize, nnls, Bounds
 
+script_dir = os.path.dirname(__file__)
+ATLAS = os.path.join(script_dir, '..', 'atlases', 'meth_atlas.csv')
+
 class ReferenceAtlas:
     def __init__(self, filename):
         self.cpg_ids = list()
@@ -108,12 +111,10 @@ def fit_nnls_constrained(atlas, sample):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--atlas', required=True, type=str,
-            default='/.mounts/labs/simpsonlab/users/jbroadbent/code/cfdna/nanopore_cfdna/atlases/meth_atlas.csv')
+    parser.add_argument('--atlas', type=str, default=ATLAS)
     parser.add_argument('--input', required=True, type=str)
     parser.add_argument('--model', default='llse', type=str, help='deconvolution model options: [nnml, llse]')
     args = parser.parse_args()
-    print(args)
     atlas = ReferenceAtlas(args.atlas)
 
     coverage = 10
