@@ -1,10 +1,11 @@
 #! /usr/bin/env python
 
 import argparse
-import numpy
+import numpy as np
 import sys
 import csv
 import os
+import pandas as pd
 
 from scipy.stats import binom
 from scipy.optimize import minimize, nnls, Bounds
@@ -16,12 +17,14 @@ class ReferenceAtlas:
         self.K = None
 
         with open(filename) as csvfile:
-            reader = csv.DictReader(csvfile)
+            reader = csv.DictReader(csvfile, delimiter='\t')
             data = list()
             for row in reader:
-                cpg_id = row['CpGs']
-                self.cpg_ids.append(cpg_id)
-                cell_types = list(row.keys())[1:]
+                chrom = row['chr']
+                start = row['start']
+                end = row['end']
+                self.cpg_ids.append((chrom, start, end))
+                cell_types = list(row.keys())[3:]
                 self.K = len(cell_types)
                 r = list()
                 for k in cell_types:
@@ -31,10 +34,10 @@ class ReferenceAtlas:
                     r.append(float(row[k]))
                 data.append(r)
 
-        self.A = numpy.array(data).reshape((self.get_num_cpgs(), self.get_num_cell_types()))
+        self.A = np.array(data).reshape((self.get_num_cpgs(), self.get_num_cell_types()))
 
     def get_x(self, sigma):
-        x = numpy.matmul(self.A, sigma)
+        x = np.matmul(self.A, sigma)
         return x
 
     def get_num_cpgs(self):
@@ -61,27 +64,27 @@ def log_likelihood_sequencing_with_errors(atlas, sigma, sample, epsilon):
     # the solver we use can try values that are outside
     # the constraints we impose, we need to clip here to prevent
     # things from blowing up
-    x = numpy.clip(numpy.ravel(atlas.get_x(sigma_t)), 0, 1.0)
+    x = np.clip(np.ravel(atlas.get_x(sigma_t)), 0, 1.0)
     p = x * (1 - epsilon) + (1 - x) * epsilon
     b =  binom.logpmf(sample.m, sample.t, p)
 
     #print("SigmaT", sigma_t)
-    #print("SigmaSum", numpy.sum(sigma_t))
+    #print("SigmaSum", np.sum(sigma_t))
     #print("m", sample.m)
     #print("t", sample.t)
     #print("x", x)
     #print("B", b)
-    #print("Sum", numpy.sum(b))
-    return numpy.sum(b)
+    #print("Sum", np.sum(b))
+    return np.sum(b)
 
 def eq_constraint(x):
-    return 1 - numpy.sum(x)
+    return 1 - np.sum(x)
 
 #
 # Model wrappers
 #
 def fit_llse(atlas, sample, epsilon):
-    sigma_0 = numpy.array([ [ 1.0 / atlas.K ] * atlas.K ])
+    sigma_0 = np.array([ [ 1.0 / atlas.K ] * atlas.K ])
     f = lambda x: -1 * log_likelihood_sequencing_with_errors(atlas, x, sample, epsilon)
 
     bnds = [ (0.0, 1.0) ] * atlas.K
@@ -92,67 +95,74 @@ def fit_llse(atlas, sample, epsilon):
 def fit_nnls(atlas, sample):
 
     # add sum=1 constraint
-    t = numpy.array([1.0] * atlas.K).reshape( (1, K) )
-    A = numpy.append(atlas.A, t, axis=0)
-    b = numpy.append(sample.x_hat, [1.0], axis=0)
+    t = np.array([1.0] * atlas.K).reshape( (1, K) )
+    A = np.append(atlas.A, t, axis=0)
+    b = np.append(sample.x_hat, [1.0], axis=0)
     res = nnls(A, b)
     return res[0]
 
 def fit_nnls_constrained(atlas, sample):
-    sigma_0 = numpy.array([ [ 1.0 / atlas.K ] * atlas.K ])
-    f = lambda x: numpy.linalg.norm(atlas.A.dot(x) - sample.x_hat)
+    sigma_0 = np.array([ [ 1.0 / atlas.K ] * atlas.K ])
+    f = lambda x: np.linalg.norm(atlas.A.dot(x) - sample.x_hat)
     bnds = [ (0.0, 1.0) ] * atlas.K
     cons = ({'type': 'eq', 'fun': eq_constraint})
     res = minimize(f, sigma_0, method='SLSQP', options={'maxiter': 10, 'disp':False}, bounds=bnds, constraints=cons)
     return res.x
 
+def get_sample_name(s):
+    s = s.split('_')[-1]
+    s = s.replace('.modifications.tsv', '')
+    return s
+def fill_forward(x):
+    prev = 0.0
+    for i in range(len(x)):
+        if np.isnan(x[i]):
+            x[i] = prev
+        prev = x[i]
+
+    return x
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--atlas', required=True, type=str,
             default='/.mounts/labs/simpsonlab/users/jbroadbent/code/cfdna/nanopore_cfdna/atlases/meth_atlas.csv')
-    parser.add_argument('--input', required=True, type=str)
+    parser.add_argument('--name', type=str, default='sample1')
     parser.add_argument('--model', default='llse', type=str, help='deconvolution model options: [nnml, llse]')
+    parser.add_argument('input', nargs='+',
+                        help='reference_modifications.tsv file')
+    parser.add_argument('-o')
+    parser.add_argument('--epsilon', default=0.05)
+    parser.add_argument('--fill', action='store_true')
     args = parser.parse_args()
-    print(args)
     atlas = ReferenceAtlas(args.atlas)
 
-    coverage = 10
-    epsilon = 0.05
-
-    data = dict()
-    with open(args.input) as csvfile:
-        reader = csv.DictReader(csvfile)
-
-        for row in reader:
-            sample_names = list(row.keys())[1:]
-            for s in sample_names:
-                if s not in data:
-                    data[s] = dict()
-
-                if row[s] != "":
-                    data[s][row['acc']] = float(row[s])
-                else:
-                    data[s][row['acc']] = 0.0
-
-    # convert to Samples and run
     Y = []
-    for sn in sample_names:
-        # get cpg frequenices in order of atlas
-        xhat = [data[sn].get(cpg, 0.0) for cpg in atlas.cpg_ids]
+    sample_name = []
+    for input_file in args.input:
+        # read input data from mbtools
+        try:
+            df = pd.read_csv(input_file, sep='\t')
+        except pd.errors.EmptyDataError:
+            continue
+        sample_name.append(get_sample_name(input_file))
+        m = np.array(df.modified_calls)
+        t = np.array(df.total_calls)
+        xhat = np.array(df.modification_frequency)
+        if args.fill:
+            xhat = fill_forward(xhat)
+        else:
+            xhat = np.nan_to_num(xhat)
 
-        # fill in default coverage values (for now)
-        t = [ coverage ] * len(xhat)
-        m = [ int(t[i] * xhat[i]) for i in range(0, len(t)) ]
-
-        s = Sample(sn, numpy.array(xhat), numpy.array(m), numpy.array(t))
+        # convert to Samples and run
+        s = Sample(args.name, xhat, m, t)
         if args.model == 'nnls':
             Y.append(fit_nnls_constrained(atlas, s))
         else:
-            Y.append(fit_llse(atlas, s, epsilon))
+            Y.append(fit_llse(atlas, s, args.epsilon))
     # output
-    print(f"ct,{','.join([sn for sn in sample_names])}")
-    for (idx, ct) in enumerate(atlas.get_cell_types()):
-        print(f"{ct},{','.join([str(y[idx]) for y in Y])}")
+    print("\t".join(sample_name))
+    for i in range(atlas.get_num_cell_types()):
+        print("\t".join([str(y[i]) for y in Y]))
 
 if __name__ == "__main__":
     main()

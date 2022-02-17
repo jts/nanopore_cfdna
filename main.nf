@@ -179,7 +179,7 @@ process clean_bams {
     rm \$(find -type f | grep modifications.sorted.bam | grep chr | grep ${sample_name})
     """
 }
-process downsample_reference_frequency {
+process downsample_modification_freq {
     memory '32 G'
     time '2d'
 
@@ -189,39 +189,33 @@ process downsample_reference_frequency {
         val coverage
         each target_coverage
     output:
-        tuple (val(sample_name), path("${sample_name}.C*C.reference_modifications.tsv"), emit: refmod)
+        tuple( val(sample_name), path("${sample_name}_${target_coverage}.modifications.tsv"), emit: modbam )
     shell:
     if (target_coverage < coverage as float)
         """
-        $params.mbtools reference-frequency ${sample_name}.modifications.sorted.bam > ${sample_name}.C${target_coverage}C.reference_modifications.tsv -D ${target_coverage} -C ${coverage} 
+        $params.mbtools region-frequency  ${sample_name}.modifications.sorted.bam -r ${projectDir}/atlases/cfDNAme.bed -D ${target_coverage} -C ${coverage as float} > ${sample_name}_${target_coverage}.modifications.tsv 
         """
     else
         """
-        f=\$(find $workDir -type f -name "${sample_name}.C${coverage as float}C.reference_modifications.tsv")
-        if [ -z \$f ]
-        then
-            $params.mbtools reference-frequency ${sample_name}.modifications.sorted.bam > ${sample_name}.C${coverage as float}C.reference_modifications.tsv
-        else
-            touch ${sample_name}.C${target_coverage}C.reference_modifications.tsv
-        fi
+        touch ${sample_name}_${target_coverage}.modifications.tsv
         """
 }
-process get_ref_freq_output {
+process get_modification_freq_output {
 
     input:
         val sample_name
         val coverage
         each target_coverage
     output:
-        tuple (val(sample_name), path("${sample_name}.C*C.reference_modifications.tsv"), emit: refmod)
+        tuple (val(sample_name), path("${sample_name}.C*C.modifications.tsv"), emit: refmod)
     shell:
     if (target_coverage < coverage as float)
         """
-        ln -s \$(ls \$(find $workDir -type f -name "${sample_name}.C${target_coverage}C.reference_modifications.tsv") -t | head -n1) ${sample_name}.C${target_coverage}C.reference_modifications.tsv
+        ln -s \$(ls \$(find $workDir -type f -name "${sample_name}.C${target_coverage}C.modifications.tsv") -t | head -n1) ${sample_name}.C${target_coverage}C.modifications.tsv
         """
     else
         """
-        ln -s \$(ls \$(find $workDir -type f -name "${sample_name}.C${coverage as float}C.reference_modifications.tsv") -t | head -n1) ${sample_name}.C${coverage as float}C.reference_modifications.tsv
+        ln -s \$(ls \$(find $workDir -type f -name "${sample_name}.C${coverage as float}C.modifications.tsv") -t | head -n1) ${sample_name}.C${coverage as float}C.modifications.tsv
         """
 }
 process calculate_coverage {
@@ -240,23 +234,6 @@ process calculate_coverage {
     samtools coverage ${sample_name}.sorted.bam | head -n25 | tail -n24 | awk -F'\\t' '{sum+=\$7} END {print(sum/NR) }'
     """
 }
-process get_cpgs {
-    memory '32 G'
-    time '1d'
-    publishDir "${sample_name}_results", mode: 'symlink'
-
-    input:
-        tuple(val(sample_name), val(refmods))
-
-    output:
-        val sample_name, emit: sample_name
-        path "${sample_name}.cpgs.csv", emit: csv
-
-    shell:
-    """
-    ${projectDir}/scripts/get_cpgs.py ${refmods.join(' ')} -o ${sample_name}.cpgs.csv
-    """
-}
 process deconvolve {
     cpus params.threads
     memory '32 G'
@@ -265,16 +242,13 @@ process deconvolve {
     publishDir "${sample_name}_results", mode: 'symlink'
     
     input:
-        val sample_name 
-        file "${sample_name}.cpgs.csv"
+        tuple(val(sample_name), val(modbams))
     output:
-        tuple( path ("${sample_name}_llse.cpgs_deconv_output.csv"), 
-               path("${sample_name}_nnls.cpgs_deconv_output.csv")) 
-        /*file "${sample_name}.cpgs_deconv_plot.png*/
+        tuple(path("${sample_name}-llse.deconv_output.csv"), path("${sample_name}-nnls.deconv_output.csv"))
     shell:
     """
-    ${params.deconvolve} --input ${sample_name}.cpgs.csv > "${sample_name}_llse.cpgs_deconv_output.csv"
-    ${params.deconvolve} --input ${sample_name}.cpgs.csv --model nnls > "${sample_name}_nnls.cpgs_deconv_output.csv"
+    ${projectDir}/scripts/nanomix.py --atlas ${projectDir}/atlases/cfDNAme.agg.tsv.test ${modbams.join(" ")} --fill > "${sample_name}-llse.deconv_output.csv"
+    ${projectDir}/scripts/nanomix.py --atlas ${projectDir}/atlases/cfDNAme.agg.tsv.test --model nnls ${modbams.join(" ")} --fill > "${sample_name}-nnls.deconv_output.csv"
     """
 }
 process plot_accuracy {
@@ -298,7 +272,7 @@ workflow pipeline {
         chrs = Channel.from(1 .. 22).map { "chr" + it }
         chrs_sex = Channel.of("chrX", "chrY")
         chrs = chrs.concat(chrs_sex)
-        cvrg = Channel.from([0.1, 0.5, 1, 2, 5, 10, 50])
+        cvrg = Channel.from([0.1,0.25,0.5,0.75,1,2,3,4,5,6,7,8,9,10])
         if (params.call_nanopolish) {
             nanopolish_input = get_nanopolish_input(input)
             modbams = nanopolish_call_methylation(chrs,
@@ -316,8 +290,8 @@ workflow pipeline {
 			    modbam_output.sample_name,
 			    modbam_output.modbam
             )
-            if (params.ref_freq){
-            reference_frequency_output = downsample_reference_frequency(
+            if (params.mbtools){
+            modification_freq_output = downsample_modification_freq(
                 coverage.sample_name,
                 coverage.modbam,
                 coverage.sample_coverage,
@@ -325,13 +299,12 @@ workflow pipeline {
                 )
             }
             else {
-                reference_frequency_output = get_ref_freq_output(coverage.sample_name,
+                modification_freq_output = get_modification_freq_output(coverage.sample_name,
                                                                  coverage.sample_coverage,
                                                                  cvrg)
             }
         }
-        cpgs = get_cpgs(reference_frequency_output.groupTuple())
-        deconv_output = deconvolve(cpgs.sample_name, cpgs.csv)
+        deconv_output = deconvolve(modification_freq_output.modbam.groupTuple())
         if (params.clean_bams) {
             clean_bams(modbam_output.sample_name)
         }
