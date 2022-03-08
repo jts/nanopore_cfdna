@@ -13,7 +13,6 @@ unpack_sample <- function(s){
     strsplit(sample_name, '-')[[1]]
 }
 
-
 correlation <- function(args) {
     df = data.frame()
     for (arg in args){
@@ -78,7 +77,9 @@ stderr <-function(args) {
 
 for (t in 1:ceiling(length(args)/10) ){
 
-    samples = args[((t-1)*10):(min(length(args), t*10))]
+    samples = args[(((t-1)*10)+1):(min(length(args), t*10))]
+
+    
 
     print(samples)
     df = stderr(samples)
@@ -88,16 +89,37 @@ for (t in 1:ceiling(length(args)/10) ){
         labs(title = "Methylation Deconvolution Accuracy",
              x = "Coverage",
              y = "Euclidean Distance to Original Sample") +
-        xlim(0,12)+
+        xlim(0,10)+
+        scale_x_continuous(breaks=c(0.1,0.5,1,2,3,4,5,6,7,8,9,10))+
+        ylim(0,1) +
         facet_grid(rows=vars(sample))
 
-    write.table(df, file=glue("coverageVstd.{t}.tsv"),
+    write.table(df, file=glue("coverageVdistance.{t}.tsv"),
                 sep='\t')
 
     ggsave(glue("coverageVdistance.{t}.png"), width=14, height=10)
+}
 
+# Plot Aggregate
+df_all = stderr(args)
+df = aggregate(df_all,
+               by = list(df_all$coverage, df_all$exp),
+               FUN = mean)
+print(df_all)
+plot = ggplot(df_all, aes(coverage, acc, color=exp)) +
+    geom_point() + 
+    geom_smooth(level=0.99)+
+    labs(title = "Methylation Deconvolution Accuracy",
+         x = "Coverage",
+         y = "Euclidean Distance to Original Sample") +
+    xlim(0,10) +
+    scale_x_continuous(breaks=c(0.1,0.5,1,2,3,4,5,6,7,8,9,10))+
+    ylim(0, 1)
 
+write.table(df, file=glue("coverageVdistance.agg.tsv"),
+            sep='\t')
 
+ggsave(glue("coverageVdistance.agg.png"), width=14, height=10)
     #df = correlation(samples)
     #print(df)
     #plot = ggplot(df, aes(coverage, acc, fill=sample)) +
@@ -113,4 +135,3 @@ for (t in 1:ceiling(length(args)/10) ){
                 #sep='\t')
 
     #ggsave(glue("coverageVcorr.{t}.png"), width=14, height=10)
-}

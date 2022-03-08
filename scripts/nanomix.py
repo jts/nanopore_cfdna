@@ -10,6 +10,9 @@ import pandas as pd
 from scipy.stats import binom
 from scipy.optimize import minimize, nnls, Bounds
 
+script_dir = os.path.dirname(__file__)
+ATLAS = os.path.join(script_dir, '..', 'atlases', 'meth_atlas.csv')
+
 class ReferenceAtlas:
     def __init__(self, filename):
         self.cpg_ids = list()
