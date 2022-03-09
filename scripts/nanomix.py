@@ -127,7 +127,7 @@ def fill_forward(x):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--atlas', required=True, type=str,
+    parser.add_argument('--atlas', type=str,
             default='/.mounts/labs/simpsonlab/users/jbroadbent/code/cfdna/nanopore_cfdna/atlases/meth_atlas.csv')
     parser.add_argument('--name', type=str, default='sample1')
     parser.add_argument('--model', default='llse', type=str, help='deconvolution model options: [nnml, llse]')
@@ -163,9 +163,9 @@ def main():
         else:
             Y.append(fit_llse(atlas, s, args.epsilon))
     # output
-    print("\t".join(sample_name))
-    for i in range(atlas.get_num_cell_types()):
-        print("\t".join([str(y[i]) for y in Y]))
+    print("\t".join(['cell_type'] + sample_name))
+    for i, cell_type in enumerate(atlas.get_cell_types()):
+        print("\t".join([cell_type] + [str(y[i]) for y in Y]))
 
 if __name__ == "__main__":
     main()
