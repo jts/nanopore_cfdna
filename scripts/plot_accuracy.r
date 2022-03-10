@@ -7,19 +7,10 @@ remove_X <- function(s) {
 	as.numeric(sub('X', '', s))
 }
 
-get_sn <- function(s){
-    sample_name = tail(strsplit(s, "/")[[1]], n=1)
-    sample_name = sub('.cpgs_deconv_output.csv', '', sample_name)
-    exp_name = tail(strsplit(sample_name, "_")[[1]], n=1)
-    sample_name = sub(glue('_{exp_name}'), '', sample_name)
-    sample_name
-}
-
-get_exp <- function(s){
-    exp_name = tail(strsplit(s, "/")[[1]], n=1)
-    exp_name = sub('.cpgs_deconv_output.csv', '', exp_name)
-    exp_name = tail(strsplit(exp_name, "_")[[1]], n=1)
-    exp_name
+unpack_sample <- function(s){
+    s = tail(strsplit(s, "/")[[1]], n=1)
+    sample_name = sub('.deconv_output.csv', '', s)
+    strsplit(sample_name, '-')[[1]]
 }
 
 correlation <- function(args) {
@@ -50,15 +41,16 @@ stderr_one <- function(expected, observed){
     for (i in 1:length(expected)) {
         sum = sum + (observed[i]-expected[i])**2
     }
-    sqrt((sum))
+    sqrt(sum)
 }
 
 stderr <-function(args) {
     df = data.frame()
     for (arg in args) {
-        sample_name = get_sn(arg)
-        exp_name = get_exp(arg)
-        df2 = read.table(arg, row.names=1, sep=',')
+        sn = unpack_sample(arg)
+        exp_name = sn[2]
+        sample_name = sn[1]
+        df2 = read.table(arg, sep='\t')
 
         # Order by descending coverage
         tdf = transpose(df2)
@@ -68,7 +60,6 @@ stderr <-function(args) {
 
         expected = df2[,1]
         df_chi = c()
-        print(df2)
         for (j in 1:length(df2)){
             df_chi[j] = stderr_one(expected, df2[,j])
         }

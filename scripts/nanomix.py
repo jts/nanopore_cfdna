@@ -17,12 +17,14 @@ class ReferenceAtlas:
         self.K = None
 
         with open(filename) as csvfile:
-            reader = csv.DictReader(csvfile)
+            reader = csv.DictReader(csvfile, delimiter='\t')
             data = list()
             for row in reader:
-                cpg_id = row['CpGs']
-                self.cpg_ids.append(cpg_id)
-                cell_types = list(row.keys())[1:]
+                chrom = row['chr']
+                start = row['start']
+                end = row['end']
+                self.cpg_ids.append((chrom, start, end))
+                cell_types = list(row.keys())[3:]
                 self.K = len(cell_types)
                 r = list()
                 for k in cell_types:
@@ -158,9 +160,9 @@ def main():
         else:
             Y.append(fit_llse(atlas, s, args.epsilon))
     # output
-    print("\t".join(sample_name))
-    for i in range(atlas.get_num_cell_types()):
-        print("\t".join([str(y[i]) for y in Y]))
+    print("\t".join(['cell_type'] + sample_name))
+    for i, cell_type in enumerate(atlas.get_cell_types()):
+        print("\t".join([cell_type] + [str(y[i]) for y in Y]))
 
 if __name__ == "__main__":
     main()
