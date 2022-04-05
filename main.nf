@@ -26,9 +26,9 @@ process clean_bams {
 }
 process downsample_modification_freq {
     memory '32 G'
-    time '2d'
+    time '7d'
 
-    publishDir "refmods", mode: "copy"
+    publishDir "mbtools", mode: "symlink"
 
     input:
         val sample_name
@@ -45,6 +45,22 @@ process downsample_modification_freq {
     else
         """
         touch ${sample_name}_${target_coverage}.modifications.tsv
+        """
+}
+process modification_freq {
+    memory '32 G'
+    time '7d'
+
+    publishDir "mbtools", mode: "symlink"
+
+    input:
+        val sample_name
+        file "${sample_name}.modifications.sorted.bam"
+    output:
+        tuple( val(sample_name), path("${sample_name}_fullCoverage.modifications.tsv"), emit: modbam )
+    shell:
+        """
+        $params.mbtools region-frequency  ${sample_name}.modifications.sorted.bam -r ${projectDir}/atlases/meth_atlas.bed > ${sample_name}_fullCoverage.modifications.tsv 
         """
 }
 process get_modification_freq_output {
@@ -94,8 +110,8 @@ process deconvolve {
         tuple(path("${sample_name}-llse.deconv_output.csv"), path("${sample_name}-nnls.deconv_output.csv"))
     shell:
     """
-    ${projectDir}/scripts/nanomix.py --atlas ${projectDir}/atlases/cfDNAme.agg.tsv.test ${modbams.join(" ")} --fill > "${sample_name}-llse.deconv_output.csv"
-    ${projectDir}/scripts/nanomix.py --atlas ${projectDir}/atlases/cfDNAme.agg.tsv.test --model nnls ${modbams.join(" ")} --fill > "${sample_name}-nnls.deconv_output.csv"
+    ${projectDir}/scripts/nanomix.py --atlas ${projectDir}/atlases/meth_atlas.tsv ${modbams.join(" ")} --fill > "${sample_name}-llse.deconv_output.csv"
+    ${projectDir}/scripts/nanomix.py --atlas ${projectDir}/atlases/meth_atlas.tsv --model nnls ${modbams.join(" ")} --fill > "${sample_name}-nnls.deconv_output.csv"
     """
 }
 process plot_accuracy {
@@ -133,16 +149,14 @@ workflow pipeline {
         }
         else {
             modbam_output = get_mergebam_output(input)
-            coverage = calculate_coverage(
-			    modbam_output.sample_name,
-			    modbam_output.modbam
-            )
-            if (params.mbtools){
-            modification_freq_output = downsample_modification_freq(
-                coverage.sample_name,
-                coverage.modbam,
-                coverage.sample_coverage,
-                cvrg
+            /*coverage = calculate_coverage(*/
+				/*modbam_output.sample_name,*/
+				/*modbam_output.modbam*/
+            /*)*/
+            if (params.run_mbtools){
+            modification_freq_output = modification_freq(
+                modbam_output.sample_name,
+                modbam_output.modbam,
                 )
             }
             else {

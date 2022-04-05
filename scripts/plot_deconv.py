@@ -98,7 +98,7 @@ def f(x):
 def plot_res(df, outpath, show=False):
 
     # df = hide_small_tissues(df)
-    df = hide_non_blood(df)
+    # df = hide_non_blood(df)
     print(df)
     nr_tissues, nr_samples = df.shape
     print(df.shape)
@@ -151,9 +151,9 @@ def main():
 
     args = parser.parse_args()
 
-    df = pd.read_csv(args.input, sep='\t', index_col='cell_type')
+    df = pd.read_csv(args.input, sep='\t', index_col='ct')
     df = df.reindex(sorted(df.columns, key=g), axis=1)
-    df = df.sort_values('10', ascending=False)
+    df = df.sort_values('6', ascending=False)
 
     plot_res(df, args.name)
 

@@ -7,10 +7,19 @@ remove_X <- function(s) {
 	as.numeric(sub('X', '', s))
 }
 
-unpack_sample <- function(s){
-    s = tail(strsplit(s, "/")[[1]], n=1)
-    sample_name = sub('.deconv_output.csv', '', s)
-    strsplit(sample_name, '-')[[1]]
+get_sn <- function(s){
+    sample_name = tail(strsplit(s, "/")[[1]], n=1)
+    sample_name = sub('.deconv_output.csv', '', sample_name)
+    exp_name = tail(strsplit(sample_name, "-")[[1]], n=1)
+    sample_name = sub(glue('-{exp_name}'), '', sample_name)
+    sample_name
+}
+
+get_exp <- function(s){
+    exp_name = tail(strsplit(s, "/")[[1]], n=1)
+    exp_name = sub('.deconv_output.csv', '', exp_name)
+    exp_name = tail(strsplit(exp_name, "-")[[1]], n=1)
+    exp_name
 }
 
 correlation <- function(args) {
@@ -26,14 +35,15 @@ correlation <- function(args) {
         colnames(df2) <- df2[1,]
         df2 <- df2[-1,]
         df2 = cor(df2)
-        print(df2)
         df2 <- data.frame(coverage = rownames(df2),
                   acc = df2[,1],
                   exp = exp_name,
                   sample = sample_name)
         df2[,1:2] = (apply(df2[,1:2], 2, remove_X))
+        print(df2)
         df = data.frame(rbind(df, df2))
     }
+    df
 }
 
 stderr_one <- function(expected, observed){
@@ -41,18 +51,18 @@ stderr_one <- function(expected, observed){
     for (i in 1:length(expected)) {
         sum = sum + (observed[i]-expected[i])**2
     }
-    sqrt(sum)
+    sqrt((sum))
 }
 
 stderr <-function(args) {
     df = data.frame()
     for (arg in args) {
-        sn = unpack_sample(arg)
-        exp_name = sn[2]
-        sample_name = sn[1]
+        sample_name = get_sn(arg)
+        exp_name = get_exp(arg)
         df2 = read.table(arg, sep='\t')
 
         # Order by descending coverage
+        print(df2)
         tdf = transpose(df2)
         df2 = transpose(tdf[order(-tdf$V1),])
         colnames(df2) <- df2[1,]
@@ -60,6 +70,7 @@ stderr <-function(args) {
 
         expected = df2[,1]
         df_chi = c()
+        print(df2)
         for (j in 1:length(df2)){
             df_chi[j] = stderr_one(expected, df2[,j])
         }

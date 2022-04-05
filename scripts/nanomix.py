@@ -151,7 +151,7 @@ def main():
         if args.fill:
             xhat = fill_forward(xhat)
         else:
-            xhat = np.nan_to_num(xhat)
+            xhat = np.nan_to_num(xhat, 1.0)
 
         # convert to Samples and run
         s = Sample(args.name, xhat, m, t)
