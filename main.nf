@@ -269,40 +269,21 @@ workflow pipeline {
     take:
         input
     main:
+
         chrs = Channel.from(1 .. 22).map { "chr" + it }
         chrs_sex = Channel.of("chrX", "chrY")
         chrs = chrs.concat(chrs_sex)
-        cvrg = Channel.from([0.1,0.25,0.5,0.75,1,2,3,4,5,6,7,8,9,10])
-        if (params.call_nanopolish) {
-            nanopolish_input = get_nanopolish_input(input)
-            modbams = nanopolish_call_methylation(chrs,
-                            nanopolish_input
-                            )
-            modbam_output = merge_bam(modbams.modbam.groupTuple())
-	    }
-        else if (params.merge_bam) {
-            modbams = get_nanopolish_output(chrs, input) 
-            modbam_output = merge_bam(modbams.modbam.groupTuple())
-        }
-        else {
-            modbam_output = get_mergebam_output(input)
-            coverage = calculate_coverage(
-			    modbam_output.sample_name,
-			    modbam_output.modbam
+        modbams = nanopolish_call_methylation(chrs,
+                        nanopolish_input
+                        )
+        modbam_output = merge_bam(modbams.modbam.groupTuple())
+        modbams = get_nanopolish_output(chrs, input) 
+        modbam_output = merge_bam(modbams.modbam.groupTuple())
+
+        modification_freq_output = downsample_modification_freq(
+            modbam_output.sample_name,
+            modbam_output.modbam,
             )
-            if (params.mbtools){
-            modification_freq_output = downsample_modification_freq(
-                coverage.sample_name,
-                coverage.modbam,
-                coverage.sample_coverage,
-                cvrg
-                )
-            }
-            else {
-                modification_freq_output = get_modification_freq_output(coverage.sample_name,
-                                                                 coverage.sample_coverage,
-                                                                 cvrg)
-            }
         }
         deconv_output = deconvolve(modification_freq_output.modbam.groupTuple())
         if (params.clean_bams) {
@@ -310,11 +291,10 @@ workflow pipeline {
         }
     emit:
         deconv_output
->>>>>>> cheng_atlas
 }
 
 workflow {
-    runs = Channel.fromPath( 'data/MMinden_*', type: 'dir')
+    runs = Channel.fromPath( 'data/MMinden*', type: 'dir')
 
     // determine sample name for each input
     input = runs.map { [it.simpleName, it] }
