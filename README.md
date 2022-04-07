@@ -55,7 +55,7 @@ If you have multiple cores available use the `--threads` parameter to specify ho
 
 ## Results
 The nextflow pipeline automatically creates a `work` directory and `results` directory for each sample. Inside the results directory you will find:
-- `sample.fragmentation_ratios.tsv`: Ratio of short to long reads in 5Mb bins. More info [here](https://www.nature.com/articles/s41467-021-24994-w). Fragmentome can be plotted with `plot_fragmentome.r`
+- `sample.fragmentation_ratios.tsv`: Ratio of short to long reads in 5Mb bins. 
 - `sample.bamstats.tsv`: *Pomoxis* alignment statistics
 - `sample.read_modifications.tsv`: nanopolish methylation calling for reads
 - `sample.region_modifications.tsv`: nanopolish methylation calling for each region in the deconvolution reference atlas
@@ -63,5 +63,6 @@ The nextflow pipeline automatically creates a `work` directory and `results` dir
 
 In the plots directory you will find:
 - `deconv_output.tsv`: Methylation deconvolution output. Estimation of proportion of cell type heterogeneity for each sample.
-- `deconv_output.png`: Methylation deconvolution output. Stacked bar plot of cell type heterogeneity.
+- `deconv_output.png`: Stacked bar plot of cell type heterogeneity.
+- `sample.fragmentome.pdf`: Ratio of short (100-150) to long (151-220) read fragments in 5Mb bins across the genome (normalized). More info [here](https://www.nature.com/articles/s41467-021-24994-w). 
 
