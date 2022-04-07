@@ -1,4 +1,5 @@
 # Simpson Lab cfDNA Analysis Pipeline
+![Deconvolution Pipeline](DeconvolutionPipeline_diagram.png)
 This pipeline follows a suite of functions to compute fragmentation and methylation patters of cfDNA samples
 
 ## External Dependencies
