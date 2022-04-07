@@ -6,7 +6,6 @@ This pipeline follows a suite of functions to compute fragmentation and methylat
 2. [Nanopolish](https://github.com/jts/nanopolish)
 3. [mbtools](https://github.com/jts/mbtools)
 4. [Reriomodels](https://github.com/nanoporetech/rerio)
-5. [meth_atlas](https://github.com/nloyfer/meth_atlas)
 
 ## Setup
 1. Install the environment with [Conda](https://docs.conda.io/en/latest/miniconda.html)
@@ -28,7 +27,6 @@ env.HDF5_PLUGIN_PATH=".../etc/"
 ...
 guppy = ".../guppy-5.0.11/bin/guppy_basecaller"
 reference = "/.mounts/labs/simpsonlab/data/references/GRCh38_no_alt_analysis_set.GCA_000001405.15.fna"
-deconvolve =".../meth_atlas/deconvolve.py"
 nanopolish = ".../nanopolish/nanopolish"
 mbtools = ".../mbtools/target/release/mbtools"
 reriomodels = ".../rerio/basecall_models"
@@ -59,11 +57,10 @@ The nextflow pipeline automatically creates a `work` directory and `results` dir
 - `sample.fragmentation_ratios.tsv`: Ratio of short to long reads in 5Mb bins. More info [here](https://www.nature.com/articles/s41467-021-24994-w). Fragmentome can be plotted with `plot_fragmentome.r`
 - `sample.bamstats.tsv`: *Pomoxis* alignment statistics
 - `sample.read_modifications.tsv`: nanopolish methylation calling for reads
-- `sample.reference_modifications.tsv`: nanopolish methylation calling for each coordinate on the reference
+- `sample.region_modifications.tsv`: nanopolish methylation calling for each region in the deconvolution reference atlas
 - `sample.bam`: alignment against reference
 
-In the launch directory you will find:
-- `cpgfreq.csv`: Modification frequency of CpG sites uses in methylation atlas deconvolution. Can be used as input [here](https://github.com/nloyfer/meth_atlas).
-- `cpgfreq_deconv_output.csv`: Methylation deconvolution output. Estimation of proportion of cell type heterogeneity for each sample.
-- `cpgfreq_deconv_plot.png`: Methylation deconvolution output. Stacked bar plot of cell type heterogeneity.
+In the plots directory you will find:
+- `deconv_output.tsv`: Methylation deconvolution output. Estimation of proportion of cell type heterogeneity for each sample.
+- `deconv_output.png`: Methylation deconvolution output. Stacked bar plot of cell type heterogeneity.
 

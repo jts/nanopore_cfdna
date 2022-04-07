@@ -42,7 +42,7 @@ process align_reads {
     cpus params.threads
     memory '32 G'
 
-    publishDir "${sample_name}_results", mode: 'copy'
+    publishDir "${sample_name}_results", mode: 'symlink'
     input:
         val sample_name
         file "${sample_name}.fastq"
@@ -59,7 +59,7 @@ process bam_stats {
     memory '32 G'
     time '1d'
 
-    publishDir "${sample_name}_results", mode: 'copy'
+    publishDir "${sample_name}_results", mode: 'symlink'
 
     input:
         val sample_name
@@ -88,10 +88,11 @@ process nanopolish_index {
     $params.nanopolish index -s sequencing_summary.txt -d run_directory ${sample_name}.fastq
     """
 }
+
 process nanopolish_call_methylation {
     cpus params.threads
     memory '32 G'
-    time '3d'
+    time '7d'
     
     input:
         each chr
@@ -128,50 +129,54 @@ process merge_bam {
     samtools merge -o ${sample_name}.merged.modifications.sorted.bam ${bams.join(' ')} --threads $params.threads
     """
 }
-process calculate_read_modification_frequency {
+process read_modification_frequency {
     cpus params.threads
     memory '32 G'
     time '1d'
     
-    publishDir "${sample_name}_results", mode: 'copy'
+    publishDir "${sample_name}_results", mode: 'symlink'
 
     input:
         val sample_name
-        file "${sample_name}.modifications.sorted.bam"
+        file "${sample_name}.merged.modifications.sorted.bam"
     output:
-        val sample_name, emit: sample_name
-        path "${sample_name}.read_modifications.tsv", emit: readmod
+        val sample_name , emit: sample_name
+        path "${sample_name}.read_modifications.tsv", emit: modtsv
     shell:
     """
-    $params.mbtools read-frequency ${sample_name}.modifications.sorted.bam > ${sample_name}.read_modifications.tsv
+        $params.mbtools read-frequency  ${sample_name}.merged.modifications.sorted.bam  > ${sample_name}.read_modifications.tsv 
     """
 }
-process calculate_reference_frequency {
-    cpus params.threads
-    memory '32 G'
-    time '1d'
-    
-    publishDir "${sample_name}_results", mode: 'copy'
-
+process clean_bams {
     input:
         val sample_name
-        file "${sample_name}.modifications.sorted.bam"
-    output:
-        val sample_name, emit: sample_name
-        path "${sample_name}.reference_modifications.tsv", emit: refmod
     shell:
     """
-    $params.mbtools reference-frequency ${sample_name}.modifications.sorted.bam > ${sample_name}.reference_modifications.tsv
+    rm \$(find -type f | grep modifications.sorted.bam | grep chr | grep ${sample_name})
     """
 }
-
-process calculate_fragmentation {
+process region_modification_frequency {
+    memory '32 G'
+    time '7d'
+    publishDir "${sample_name}_results", mode: 'symlink'
+    input:
+        val sample_name
+        file "${sample_name}.merged.modifications.sorted.bam"
+    output:
+        val sample_name, emit: sample_name
+        path "${sample_name}.region_modifications.tsv", emit: modtsv
+    shell:
+        """
+        $params.mbtools region-frequency  ${sample_name}.merged.modifications.sorted.bam -r ${projectDir}/atlases/cfDNAme.bed  > ${sample_name}.region_modifications.tsv 
+        """
+}
+process fragmentation {
     cpus params.threads
     memory '32 G'
     time '1d'
-    
-    publishDir "${sample_name}_results", mode: 'copy'
 
+    publishDir "${sample_name}_results", mode: 'symlink'
+    
     input:
         val sample_name
         file "${sample_name}.read_modifications.tsv"
@@ -182,22 +187,16 @@ process calculate_fragmentation {
     ${projectDir}/scripts/fragmentation.py -o ${sample_name}.fragmentation.ratios.tsv -s 100 151 -l 151 221 -b 5000000 ${sample_name}.read_modifications.tsv
     """
 }
-
-process get_cpgs {
-    cpus params.threads
-    memory '32 G'
-    time '1d'
-    publishDir launchDir, mode: 'copy'
+process plot_fragmentation {
+    publishDir "plots", mode: 'copy'
 
     input:
-        val refmods
-
+        val fragmentomes
     output:
-        file "cpgfreq.csv" 
-
+        path "fragmentome.pdf"
     shell:
     """
-    ${projectDir}/scripts/get_cpgs.py ${refmods.join(' ')} -o cpgfreq.csv --fill
+    ${projectDir}/scripts/plot_fragmentome.r ${fragmentomes.join(" ")}
     """
 }
 process deconvolve {
@@ -205,19 +204,31 @@ process deconvolve {
     memory '32 G'
     time '1d'
 
-    publishDir launchDir, mode: 'copy'
+    publishDir "plots", mode: 'copy'
     
     input:
-        file "cpgfreq.csv"
+        val modbams
     output:
-        file "cpgfreq_deconv_plot.png"
-        file "cpgfreq_deconv_output.csv"
+        path "deconv_output.tsv"
     shell:
     """
-    ${params.deconvolve} cpgfreq.csv
+    ${projectDir}/scripts/nanomix.py --atlas ${projectDir}/atlases/cfDNAme.agg.tsv ${modbams.join(" ")} > "deconv_output.tsv"
     """
 }
 
+process plot_deconvolution {
+
+    publishDir "plots", mode: 'copy'
+
+    input:
+        val deconv_output
+    output:
+        file "deconv_output.png"
+    shell:
+    """
+    ${projectDir}/scripts/plot_deconv.py -name deconv_output.png $deconv_output
+    """
+}
 workflow pipeline {
     take:
         input
@@ -254,33 +265,28 @@ workflow pipeline {
                         index_output
                         )
         modbam_output = merge_bam(modbams.modbam.groupTuple())
-        read_frequency_output = calculate_read_modification_frequency(
+        read_frequency_output = read_modification_frequency(
             modbam_output.sample_name,
             modbam_output.modbam
         )
-        reference_frequency_output = calculate_reference_frequency(
-            modbam_output.sample_name,
-            modbam_output.modbam
-        )
-        fragmentation_output = calculate_fragmentation(
+        fragmentation_output = fragmentation(
             read_frequency_output.sample_name,
-            read_frequency_output.readmod
+            read_frequency_output.modtsv
         )
-    emit:
-        reference_frequency_output.refmod
+        plot_fragmentation(fragmentation_output.collect())
+
+        region_frequency_output = region_modification_frequency(
+            modbam_output.sample_name,
+            modbam_output.modbam,
+            )
+        deconv_output = deconvolve(region_frequency_output.modtsv.collect())
+        plot_deconvolution(deconv_output)
 }
 
 workflow {
-
     runs = Channel.fromPath( 'data/*', type: 'dir')
 
     // determine sample name for each input
     input = runs.map { [it.simpleName, it] }
-    input.view()
-
-    refmods = pipeline(input)
-
-    cpgs = get_cpgs(refmods.collect())
-    deconvolve(cpgs)
-
+    pipeline(input)
 }
