@@ -54,7 +54,7 @@ nextflow run <.../nanopore_cfdna/>
 If you have multiple cores available use the `--threads` parameter to specify how many you would like to use.
 
 ## Results
-The nextflow pipeline automatically creates a `work` directory and `results` directory for each sample. Inside the results directory you will find:
+The nextflow pipeline automatically creates a `work` directory and results directories. Inside you will find:
 - `sample.fragmentation_ratios.tsv`: Ratio of short to long reads in 5Mb bins. 
 - `sample.bamstats.tsv`: *Pomoxis* alignment statistics
 - `sample.read_modifications.tsv`: nanopolish methylation calling for reads
