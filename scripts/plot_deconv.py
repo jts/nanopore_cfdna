@@ -127,7 +127,7 @@ def plot_res(df, outpath, show=False):
     plt.ylabel("Mixture Proportion")
     # Add a legend and a title
     plt.legend(loc='upper left', bbox_to_anchor=(1, 1), ncol=1)
-    plt.title('Deconvolution Results')
+    plt.title('Deconvolution Results\n'+ op.basename(outpath))
 
     # adjust layout, save and show
     plt.tight_layout(rect=[0, 0, .83, 1])

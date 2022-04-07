@@ -114,7 +114,7 @@ def fit_nnls_constrained(atlas, sample):
 
 def get_sample_name(s):
     s = s.split('/')[-1]
-    s = s.replace('.region_modifications.tsv', '')
+    s = s.split('.')[0]
     return s
 def fill_forward(x):
     prev = 0.0

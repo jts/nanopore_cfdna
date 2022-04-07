@@ -58,11 +58,9 @@ The nextflow pipeline automatically creates a `work` directory and `results` dir
 - `sample.fragmentation_ratios.tsv`: Ratio of short to long reads in 5Mb bins. 
 - `sample.bamstats.tsv`: *Pomoxis* alignment statistics
 - `sample.read_modifications.tsv`: nanopolish methylation calling for reads
-- `sample.region_modifications.tsv`: nanopolish methylation calling for each region in the deconvolution reference atlas
+- `sample.referenceAtlas.region_modifications.tsv`: nanopolish methylation calling for each region in the deconvolution reference atlas
 - `sample.bam`: alignment against reference
-
-In the plots directory you will find:
-- `deconv_output.tsv`: Methylation deconvolution output. Estimation of proportion of cell type heterogeneity for each sample.
-- `deconv_output.png`: Stacked bar plot of cell type heterogeneity.
+- `deconv_output.referenceAtlas.method.tsv`: Methylation deconvolution output. Estimation of proportion of cell type heterogeneity for each sample.
+- `deconv_output.referenceAtlas.method.png`: Stacked bar plot of cell type heterogeneity.
 - `sample.fragmentome.pdf`: Ratio of short (100-150) to long (151-220) read fragments in 5Mb bins across the genome (normalized). More info [here](https://www.nature.com/articles/s41467-021-24994-w). 
 

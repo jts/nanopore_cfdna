@@ -35,14 +35,14 @@ process basecall_reads {
         path "basecalled/sequencing_summary.txt", emit: sequencing_summary
     shell:
     """
-    $params.guppy -r --num_callers $task.cpus --gpu_runners_per_device 4 --chunks_per_runner 512 -c res_dna_r9.4.1_e8.1_hac_v033.cfg -d $params.reriomodels -i $run_directory -x "cuda:0 cuda:1" -s basecalled
+    $params.guppy -r --num_callers $task.cpus --gpu_runners_per_device 4 --chunks_per_runner 512 -c $params.guppy_model -i $run_directory -x "cuda:0 cuda:1" -s basecalled
     """
 }
 process align_reads {
     cpus params.threads
     memory '32 G'
 
-    publishDir "${sample_name}_results", mode: 'symlink'
+    publishDir "alignments", mode: 'symlink'
     input:
         val sample_name
         file "${sample_name}.fastq"
@@ -59,7 +59,7 @@ process bam_stats {
     memory '32 G'
     time '1d'
 
-    publishDir "${sample_name}_results", mode: 'symlink'
+    publishDir "alignments", mode: 'symlink'
 
     input:
         val sample_name
@@ -117,7 +117,7 @@ process merge_bam {
     memory '32 G'
     time '1d'
     
-    publishDir "${sample_name}_results", mode: 'copy'
+    publishDir "modifications/bams", mode: 'copy'
 
     input:
         tuple( val(sample_name), val(bams) )
@@ -134,7 +134,7 @@ process read_modification_frequency {
     memory '32 G'
     time '1d'
     
-    publishDir "${sample_name}_results", mode: 'symlink'
+    publishDir "modifications/read_frequency", mode: 'symlink'
 
     input:
         val sample_name
@@ -155,27 +155,12 @@ process clean_bams {
     rm \$(find -type f | grep modifications.sorted.bam | grep chr | grep ${sample_name})
     """
 }
-process region_modification_frequency {
-    memory '32 G'
-    time '7d'
-    publishDir "${sample_name}_results", mode: 'symlink'
-    input:
-        val sample_name
-        file "${sample_name}.merged.modifications.sorted.bam"
-    output:
-        val sample_name, emit: sample_name
-        path "${sample_name}.region_modifications.tsv", emit: modtsv
-    shell:
-        """
-        $params.mbtools region-frequency  ${sample_name}.merged.modifications.sorted.bam -r ${projectDir}/atlases/cfDNAme.bed  > ${sample_name}.region_modifications.tsv 
-        """
-}
 process fragmentation {
     cpus params.threads
     memory '32 G'
     time '1d'
 
-    publishDir "${sample_name}_results", mode: 'symlink'
+    publishDir "fragmentation", mode: 'symlink'
     
     input:
         val sample_name
@@ -188,45 +173,73 @@ process fragmentation {
     """
 }
 process plot_fragmentation {
-    publishDir "plots", mode: 'copy'
+    publishDir "fragmentation", mode: 'copy'
 
     input:
         val fragmentomes
     output:
-        path "fragmentome.pdf"
+        file "*fragmentome.pdf"
     shell:
+
     """
     ${projectDir}/scripts/plot_fragmentome.r ${fragmentomes.join(" ")}
     """
+}
+process region_modification_frequency {
+    memory '32 G'
+    time '7d'
+    publishDir "modifications/region_frequency", mode: 'symlink'
+    input:
+        val sample_name
+        file "${sample_name}.merged.modifications.sorted.bam"
+    output:
+        val sample_name, emit: sample_name
+        path "${sample_name}.chengAtlas.region_modifications.tsv", emit: mosstsv
+        path "${sample_name}.mossAtlas.region_modifications.tsv", emit: chengtsv
+    shell:
+        """
+        $params.mbtools region-frequency  ${sample_name}.merged.modifications.sorted.bam -r ${projectDir}/atlases/chengAtlas.bed  > ${sample_name}.chengAtlas.region_modifications.tsv 
+        $params.mbtools region-frequency  ${sample_name}.merged.modifications.sorted.bam -r ${projectDir}/atlases/mossAtlas.bed  > ${sample_name}.mossAtlas.region_modifications.tsv 
+        """
 }
 process deconvolve {
     cpus params.threads
     memory '32 G'
     time '1d'
 
-    publishDir "plots", mode: 'copy'
+    publishDir "deconvolution", mode: 'copy'
     
     input:
-        val modbams
+        val mosstsv
+        val chengtsv
     output:
-        path "deconv_output.tsv"
+        tuple(path("deconv_output.chengAtlas.llse.tsv"),
+        path("deconv_output.chengAtlas.nnls.tsv"),
+        path("deconv_output.mossAtlas.llse.tsv"),
+        path("deconv_output.mossAtlas.nnls.tsv"))
     shell:
     """
-    ${projectDir}/scripts/nanomix.py --atlas ${projectDir}/atlases/cfDNAme.agg.tsv ${modbams.join(" ")} > "deconv_output.tsv"
+    ${projectDir}/scripts/nanomix.py --model llse --atlas ${projectDir}/atlases/chengAtlas.tsv ${chengtsv.join(" ")} > "deconv_output.chengAtlas.llse.tsv"
+    ${projectDir}/scripts/nanomix.py --model nnls --atlas ${projectDir}/atlases/chengAtlas.tsv ${chengtsv.join(" ")} > "deconv_output.chengAtlas.nnls.tsv"
+    ${projectDir}/scripts/nanomix.py --model llse --atlas ${projectDir}/atlases/mossAtlas.tsv ${mosstsv.join(" ")} > "deconv_output.mossAtlas.llse.tsv"
+    ${projectDir}/scripts/nanomix.py --model nnls --atlas ${projectDir}/atlases/mossAtlas.tsv ${mosstsv.join(" ")} > "deconv_output.mossAtlas.nnls.tsv"
     """
 }
 
 process plot_deconvolution {
 
-    publishDir "plots", mode: 'copy'
+    publishDir "deconvolution", mode: 'copy'
 
     input:
-        val deconv_output
+        val deconv_outputs
     output:
-        file "deconv_output.png"
+        file "*.png"
     shell:
     """
-    ${projectDir}/scripts/plot_deconv.py -name deconv_output.png $deconv_output
+    for f in ${deconv_outputs.join(" ")}
+        do name=\$(echo \$f | sed s/.tsv/.png/g) 
+        ${projectDir}/scripts/plot_deconv.py \$f -name \$(basename \$name)
+    done
     """
 }
 workflow pipeline {
@@ -279,7 +292,8 @@ workflow pipeline {
             modbam_output.sample_name,
             modbam_output.modbam,
             )
-        deconv_output = deconvolve(region_frequency_output.modtsv.collect())
+        deconv_output = deconvolve(region_frequency_output.chengtsv.collect(),
+                                   region_frequency_output.mosstsv.collect())
         plot_deconvolution(deconv_output)
 }
 
