@@ -161,10 +161,6 @@ def main():
         m = np.array(df.modified_calls)
         t = np.array(df.total_calls)
         xhat = np.array(df.modification_frequency)
-        if args.fill:
-            xhat = fill_forward(xhat)
-        else:
-            xhat = np.nan_to_num(xhat)
 
         # convert to Samples and run
         s = Sample(args.name, xhat, m, t)
