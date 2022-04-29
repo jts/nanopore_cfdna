@@ -118,7 +118,7 @@ def fit_nnls_constrained(atlas, sample):
 
 def get_sample_name(s):
     s = s.split('/')[-1]
-    s = s.split('.')[1]
+    #s = s.split('.')[1]
     return s
 def fill_forward(x):
     prev = 0.0
@@ -132,7 +132,7 @@ def fill_forward(x):
 def get_covered_positions(df):
     positions = set()
     for i, row in df.iterrows():
-        positions.add((row['chr'],row['start'],row['end']))
+        positions.add((row['chromosome'],row['start'],row['end']))
     return positions
 
 def main():
@@ -158,9 +158,9 @@ def main():
             continue
         sample_name.append(get_sample_name(input_file))
         atlas = ReferenceAtlas(args.atlas, get_covered_positions(df))
-        m = np.array(df.modified_calls)
-        t = np.array(df.total_calls)
+        t = np.array(df.num_called_reads)
         xhat = np.array(df.modification_frequency)
+        m = np.rint((t * xhat))
 
         # convert to Samples and run
         s = Sample(args.name, xhat, m, t)
