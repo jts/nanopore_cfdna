@@ -188,18 +188,15 @@ process plot_fragmentation {
 process region_modification_frequency {
     memory '32 G'
     time '7d'
-    publishDir "modifications/region_frequency", mode: 'symlink'
+    publishDir "modifications/region_frequency", mode: 'copy'
     input:
-        val sample_name
-        file "${sample_name}.merged.modifications.sorted.bam"
+        tuple val(sample_name), file("${sample_name}.bam")
+        each atlas
     output:
-        val sample_name, emit: sample_name
-        path "${sample_name}.chengAtlas.region_modifications.tsv", emit: mosstsv
-        path "${sample_name}.mossAtlas.region_modifications.tsv", emit: chengtsv
+        tuple(val(atlas), path("${sample_name}.${atlas}Atlas.region_modifications.tsv"), emit: tsv)
     shell:
         """
-        $params.mbtools region-frequency  ${sample_name}.merged.modifications.sorted.bam -r ${projectDir}/atlases/chengAtlas.bed  > ${sample_name}.chengAtlas.region_modifications.tsv 
-        $params.mbtools region-frequency  ${sample_name}.merged.modifications.sorted.bam -r ${projectDir}/atlases/mossAtlas.bed  > ${sample_name}.mossAtlas.region_modifications.tsv 
+        $params.mbtools region-frequency  ${sample_name}.bam -r ${projectDir}/atlases/${atlas}Atlas.bed --cpg  --reference-genome ~/simpsonlab/data/references/GRCh38_no_alt_analysis_set.GCA_000001405.15.fna > ${sample_name}.${atlas}Atlas.region_modifications.tsv 
         """
 }
 process deconvolve {
@@ -210,19 +207,14 @@ process deconvolve {
     publishDir "deconvolution", mode: 'copy'
     
     input:
-        val mosstsv
-        val chengtsv
+        tuple(val(atlas), val(tsv))
     output:
-        tuple(path("deconv_output.chengAtlas.llse.tsv"),
-        path("deconv_output.chengAtlas.nnls.tsv"),
-        path("deconv_output.mossAtlas.llse.tsv"),
-        path("deconv_output.mossAtlas.nnls.tsv"))
+        tuple(path("${atlas}Atlas.llse.deconv_output.tsv"),
+        path("${atlas}Atlas.nnls.deconv_output.tsv"))
     shell:
     """
-    ${projectDir}/scripts/nanomix.py --model llse --atlas ${projectDir}/atlases/chengAtlas.tsv ${chengtsv.join(" ")} > "deconv_output.chengAtlas.llse.tsv"
-    ${projectDir}/scripts/nanomix.py --model nnls --atlas ${projectDir}/atlases/chengAtlas.tsv ${chengtsv.join(" ")} > "deconv_output.chengAtlas.nnls.tsv"
-    ${projectDir}/scripts/nanomix.py --model llse --atlas ${projectDir}/atlases/mossAtlas.tsv ${mosstsv.join(" ")} > "deconv_output.mossAtlas.llse.tsv"
-    ${projectDir}/scripts/nanomix.py --model nnls --atlas ${projectDir}/atlases/mossAtlas.tsv ${mosstsv.join(" ")} > "deconv_output.mossAtlas.nnls.tsv"
+    ${projectDir}/scripts/nanomix.py --model llse --atlas ${projectDir}/atlases/${atlas}Atlas.tsv ${tsv.join(" ")}  > "${atlas}Atlas.llse.deconv_output.tsv"
+    ${projectDir}/scripts/nanomix.py --model nnls --atlas ${projectDir}/atlases/${atlas}Atlas.tsv ${tsv.join(" ")} > "${atlas}Atlas.nnls.deconv_output.tsv"
     """
 }
 
@@ -238,7 +230,7 @@ process plot_deconvolution {
     """
     for f in ${deconv_outputs.join(" ")}
         do name=\$(echo \$f | sed s/.tsv/.png/g) 
-        ${projectDir}/scripts/plot_deconv.py \$f -name \$(basename \$name)
+        ${projectDir}/scripts/plot_deconv_berman.py \$f -s HU10,HU12,HU11,bc05,bc02,bc04,bc03,bc09,bc08,bc01,S1,bc11,bc10
     done
     """
 }
@@ -246,61 +238,14 @@ workflow pipeline {
     take:
         input
     main:
-        basecall_output = basecall_reads(input)
-        merge_fastq_output = merge_reads(
-            basecall_output.sample_name,
-            basecall_output.basecalled_directory
-        )
-        index_output = nanopolish_index(
-            basecall_output.sample_name,
-            merge_fastq_output,
-            basecall_output.sequencing_summary,
-            basecall_output.run_directory
-        )
-        align_output = align_reads(
-            basecall_output.sample_name,
-            merge_fastq_output
-        )
-        bam_stats(
-            basecall_output.sample_name,
-            align_output.bam,
-            align_output.bai
-        )
-        chrs = Channel.from(1 .. 22).map { "chr" + it }
-        chrs_sex = Channel.of("chrX", "chrY")
-        chrs = chrs.concat(chrs_sex)
-        modbams = nanopolish_call_methylation(chrs,
-                        basecall_output.sample_name,
-                        merge_fastq_output,
-                        align_output.bam,
-                        align_output.bai,
-                        basecall_output.run_directory,
-                        index_output
-                        )
-        modbam_output = merge_bam(modbams.modbam.groupTuple())
-        read_frequency_output = read_modification_frequency(
-            modbam_output.sample_name,
-            modbam_output.modbam
-        )
-        fragmentation_output = fragmentation(
-            read_frequency_output.sample_name,
-            read_frequency_output.modtsv
-        )
-        plot_fragmentation(fragmentation_output.collect())
-
-        region_frequency_output = region_modification_frequency(
-            modbam_output.sample_name,
-            modbam_output.modbam,
-            )
-        deconv_output = deconvolve(region_frequency_output.chengtsv.collect(),
-                                   region_frequency_output.mosstsv.collect())
+        atlas = Channel.from("Berman", "moss", "cheng", "chengOrig")
+        region_frequency_output = region_modification_frequency(input, atlas)
+        deconv_output = deconvolve(region_frequency_output.tsv.groupTuple())
         plot_deconvolution(deconv_output)
 }
 
 workflow {
-    runs = Channel.fromPath( 'data/*', type: 'dir')
-
-    // determine sample name for each input
-    input = runs.map { [it.simpleName, it] }
+    input = Channel.fromPath('data/*.bam', type: 'file')
+        .map {[it.simpleName, it, ]}
     pipeline(input)
 }
