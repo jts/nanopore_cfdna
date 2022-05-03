@@ -100,7 +100,7 @@ process nanopolish_call_methylation {
         file "${sample_name}.fastq"
         file "${sample_name}.sorted.bam"
         file "${sample_name}.sorted.bam.bai"
-        file "run_directory"
+        file run_directory
         tuple file("${sample_name}.fastq.index"),
             file("${sample_name}.fastq.index.gzi"),
             file("${sample_name}.fastq.index.fai"),
