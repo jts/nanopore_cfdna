@@ -28,11 +28,12 @@ def combine(df_sample, df_atlas):
     :param df_atlas: pd.DataFrame of CpG sites with the 'start' index indicating the C
     :param df_sample: pd.DataFrame of CpG sites with the 'end' index indicating the C on the + strand and the 'start' index indicating the C on the - strand
     """
-    # compute total calls and modified calls
+    # compute total calls and modified calls method from Berman et al. 2022
     df_sample.total_reads = round(df_sample.Score * df_sample.BlockCount/1000)
     df_sample.methylated_reads = df_sample.total_reads*df_sample.BlockSizes /100
 
     # Intersect
+    # Assume atlas loci are from the positive strand
     df_atlas.Strand = '+'
     df_atlas = df_atlas.drop_duplicate_positions()
     negative_strand = df_sample.intersect(df_atlas, strandedness='opposite')
