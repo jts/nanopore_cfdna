@@ -80,12 +80,12 @@ process nanopolish_index {
         val sample_name
         file "${sample_name}.fastq"
         file "sequencing_summary.txt"
-        file "run_directory"
+        file run_directory
     output:
         tuple file("${sample_name}.fastq.index"), file("${sample_name}.fastq.index.gzi"), file("${sample_name}.fastq.index.fai"), file("${sample_name}.fastq.index.readdb")
     shell:
     """
-    $params.nanopolish index -s sequencing_summary.txt -d run_directory ${sample_name}.fastq
+    $params.nanopolish index -s sequencing_summary.txt -d $run_directory ${sample_name}.fastq
     """
 }
 
