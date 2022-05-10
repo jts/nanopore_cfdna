@@ -6,6 +6,8 @@ nextflow.enable.dsl = 2
 process merge_reads {
     cpus 1
     memory '1 G'
+    
+    publishDir "basecalls", mode: "symlink"
 
     input: 
         val sample_name
@@ -26,6 +28,8 @@ process basecall_reads {
     time '3d'
     queue 'gpu.q'
 
+    publishDir "basecalls/${sample_name}", mode: "symlink"
+
     input:
         tuple val(sample_name), file(run_directory)
     output:
@@ -38,9 +42,23 @@ process basecall_reads {
     $params.guppy -r --num_callers $task.cpus --gpu_runners_per_device 4 --chunks_per_runner 512 -c $params.guppy_model -i $run_directory -x "cuda:0 cuda:1" -s basecalled
     """
 }
+process get_basecall_reads {
+    input:
+        tuple val(sample_name), file(run_directory)
+    output:
+        val sample_name, emit: sample_name
+        path run_directory, emit: run_directory
+        path "basecalled", emit: basecalled_directory
+        path "basecalled/sequencing_summary.txt", emit: sequencing_summary
+    shell:
+    """
+    ln -s ${launchDir}/basecalls/${sample_name}/basecalled basecalled
+    """
+}
 process align_reads {
     cpus params.threads
     memory '32 G'
+    time '2d'
 
     publishDir "alignments", mode: 'symlink'
     input:
@@ -85,7 +103,7 @@ process nanopolish_index {
         tuple file("${sample_name}.fastq.index"), file("${sample_name}.fastq.index.gzi"), file("${sample_name}.fastq.index.fai"), file("${sample_name}.fastq.index.readdb")
     shell:
     """
-    $params.nanopolish index -s sequencing_summary.txt -d $run_directory ${sample_name}.fastq
+    $params.nanopolish index -s sequencing_summary.txt -d ${run_directory}/ ${sample_name}.fastq
     """
 }
 
@@ -246,11 +264,15 @@ workflow pipeline {
     take:
         input
     main:
-        basecall_output = basecall_reads(input)
+        if (params.basecall){
+            basecall_output = basecall_reads(input)
+        }else{
+            basecall_output = get_basecall_reads(input)
+        }
         merge_fastq_output = merge_reads(
             basecall_output.sample_name,
             basecall_output.basecalled_directory
-        )
+        )   
         index_output = nanopolish_index(
             basecall_output.sample_name,
             merge_fastq_output,
@@ -299,8 +321,6 @@ workflow pipeline {
 
 workflow {
     runs = Channel.fromPath( 'data/*', type: 'dir')
-
-    // determine sample name for each input
     input = runs.map { [it.simpleName, it] }
     pipeline(input)
 }
