@@ -3,23 +3,6 @@
 
 nextflow.enable.dsl = 2
 
-process merge_reads {
-    cpus 1
-    memory '1 G'
-    
-    publishDir "basecalls", mode: "symlink"
-
-    input: 
-        val sample_name
-        file basecall_directory
-    output:
-        file "merged_reads/${sample_name}.fastq"
-    shell:
-    """
-    mkdir -p merged_reads
-    fastcat -x ${basecall_directory} > merged_reads/${sample_name}.fastq
-    """
-}
 process basecall_reads {
     label 'GPU'
 
@@ -27,46 +10,72 @@ process basecall_reads {
     cpus params.threads
     time '3d'
     queue 'gpu.q'
+    cache 'lenient'
 
-    publishDir "basecalls/${sample_name}", mode: "symlink"
+    publishDir "basecalls/${sample_name}", mode: "symlink", overwrite: false
 
     input:
-        tuple val(sample_name), file(run_directory)
+        tuple val(sample_name), path(run_directory)
     output:
         val sample_name, emit: sample_name
         path run_directory, emit: run_directory
         path "basecalled", emit: basecalled_directory
-        path "basecalled/sequencing_summary.txt", emit: sequencing_summary
     shell:
     """
     $params.guppy -r --num_callers $task.cpus --gpu_runners_per_device 4 --chunks_per_runner 512 -c $params.guppy_model -i $run_directory -x "cuda:0 cuda:1" -s basecalled
     """
 }
 process get_basecall_reads {
+    cache 'lenient'
     input:
-        tuple val(sample_name), file(run_directory)
+        tuple val(sample_name), path(run_directory)
     output:
-        val sample_name, emit: sample_name
-        path run_directory, emit: run_directory
-        path "basecalled", emit: basecalled_directory
-        path "basecalled/sequencing_summary.txt", emit: sequencing_summary
+        val sample_name
+        path run_directory
+        path "basecalled"
     shell:
     """
     ln -s ${launchDir}/basecalls/${sample_name}/basecalled basecalled
+    """
+}
+process merge_reads {
+    cpus 1
+    memory '1 G'
+    
+    publishDir "basecalls/${sample_name}", mode: "symlink"
+    cache 'lenient'
+
+    input: 
+        val sample_name
+        path run_directory
+        path basecall_directory
+    output:
+        val sample_name
+        path run_directory
+        path "basecalled"
+        path "merged_reads/${sample_name}.fastq"
+    shell:
+    """
+    mkdir -p merged_reads
+    fastcat -x ${basecall_directory} > merged_reads/${sample_name}.fastq
     """
 }
 process align_reads {
     cpus params.threads
     memory '32 G'
     time '2d'
+    cache 'lenient'
 
     publishDir "alignments", mode: 'symlink'
     input:
         val sample_name
-        file "${sample_name}.fastq"
+        path run_directory
+        path "basecalled"
+        path "${sample_name}.fastq"
     output:
-        path "${sample_name}.sorted.bam", emit: bam
-        path "${sample_name}.sorted.bam.bai", emit: bai
+        tuple val(sample_name),
+            path("${sample_name}.sorted.bam"),
+            path("${sample_name}.sorted.bam.bai")
     shell:
     """
     minimap2 -ax map-ont -t $task.cpus $params.reference ${sample_name}.fastq | samtools sort -T tmp > ${sample_name}.sorted.bam
@@ -76,13 +85,14 @@ process align_reads {
 process bam_stats {
     memory '32 G'
     time '1d'
+    cache 'lenient'
 
     publishDir "alignments", mode: 'symlink'
 
     input:
-        val sample_name
-        file "${sample_name}.sorted.bam"
-        file "${sample_name}.sorted.bam.bai"
+        tuple val(sample_name),
+            path("${sample_name}.sorted.bam"),
+            path("${sample_name}.sorted.bam.bai")
     output:
         path "${sample_name}.bamstats.tsv", emit: stats
     shell:
@@ -93,17 +103,24 @@ process bam_stats {
 process nanopolish_index {
     time '1d'
     memory '24 G'
+    cache 'lenient'
 
     input:
         val sample_name
-        file "${sample_name}.fastq"
-        file "sequencing_summary.txt"
-        file run_directory
+        path run_directory
+        path basecalled
+        path "${sample_name}.fastq"
     output:
-        tuple file("${sample_name}.fastq.index"), file("${sample_name}.fastq.index.gzi"), file("${sample_name}.fastq.index.fai"), file("${sample_name}.fastq.index.readdb")
+        tuple val(sample_name),
+            path(run_directory),
+            path("${sample_name}.fastq"),
+            path("${sample_name}.fastq.index"),
+            path("${sample_name}.fastq.index.gzi"),
+            path("${sample_name}.fastq.index.fai"),
+            path("${sample_name}.fastq.index.readdb")
     shell:
     """
-    $params.nanopolish index -s sequencing_summary.txt -d ${run_directory}/ ${sample_name}.fastq
+    $params.nanopolish index -s ${basecalled}/sequencing_summary.txt -d ${run_directory}/ ${sample_name}.fastq
     """
 }
 
@@ -111,18 +128,19 @@ process nanopolish_call_methylation {
     cpus params.threads
     memory '32 G'
     time '7d'
+    cache 'lenient'
     
     input:
         each chr
-        val sample_name
-        file "${sample_name}.fastq"
-        file "${sample_name}.sorted.bam"
-        file "${sample_name}.sorted.bam.bai"
-        file run_directory
-        tuple file("${sample_name}.fastq.index"),
-            file("${sample_name}.fastq.index.gzi"),
-            file("${sample_name}.fastq.index.fai"),
-            file("${sample_name}.fastq.index.readdb")
+        tuple val(sample_name),
+            path("${sample_name}.sorted.bam"),
+            path("${sample_name}.sorted.bam.bai"),
+            path(run_directory),
+            path("${sample_name}.fastq"),
+            path("${sample_name}.fastq.index"),
+            path("${sample_name}.fastq.index.gzi"),
+            path("${sample_name}.fastq.index.fai"),
+            path("${sample_name}.fastq.index.readdb")
     output:
         tuple( val(sample_name), path("${sample_name}.${chr}.modifications.sorted.bam"), emit: modbam)
     shell:
@@ -135,13 +153,13 @@ process merge_bam {
     memory '32 G'
     time '1d'
     
-    publishDir "modifications/bams", mode: 'copy'
+    publishDir "modifications/bams", mode: 'symlink', overwrite: true
 
     input:
         tuple( val(sample_name), val(bams) )
     output:
-        val sample_name, emit: sample_name
-        path "${sample_name}.merged.modifications.sorted.bam", emit: modbam
+        val sample_name
+        path "${sample_name}.merged.modifications.sorted.bam"
     shell:
     """
     samtools merge -o ${sample_name}.merged.modifications.sorted.bam ${bams.join(' ')} --threads $params.threads
@@ -150,16 +168,16 @@ process merge_bam {
 process read_modification_frequency {
     cpus params.threads
     memory '32 G'
-    time '1d'
+    time '4d'
     
-    publishDir "modifications/read_frequency", mode: 'symlink'
+    publishDir "modifications/read_frequency", mode: 'symlink', overwrite: true
 
     input:
         val sample_name
         file "${sample_name}.merged.modifications.sorted.bam"
     output:
-        val sample_name , emit: sample_name
-        path "${sample_name}.read_modifications.tsv", emit: modtsv
+        val sample_name
+        path "${sample_name}.read_modifications.tsv"
     shell:
     """
         $params.mbtools read-frequency  ${sample_name}.merged.modifications.sorted.bam  > ${sample_name}.read_modifications.tsv 
@@ -178,7 +196,7 @@ process fragmentation {
     memory '32 G'
     time '1d'
 
-    publishDir "fragmentation", mode: 'symlink'
+    publishDir "fragmentation", mode: 'copy'
     
     input:
         val sample_name
@@ -206,18 +224,16 @@ process plot_fragmentation {
 process region_modification_frequency {
     memory '32 G'
     time '7d'
-    publishDir "modifications/region_frequency", mode: 'symlink'
+    publishDir "modifications/region_frequency", mode: 'copy'
     input:
         val sample_name
-        file "${sample_name}.merged.modifications.sorted.bam"
+        file "${sample_name}.bam"
+        each atlas
     output:
-        val sample_name, emit: sample_name
-        path "${sample_name}.chengAtlas.region_modifications.tsv", emit: mosstsv
-        path "${sample_name}.mossAtlas.region_modifications.tsv", emit: chengtsv
+        tuple(val(atlas), path("${sample_name}.${atlas}Atlas.region_modifications.tsv"), emit: tsv)
     shell:
         """
-        $params.mbtools region-frequency  ${sample_name}.merged.modifications.sorted.bam -r ${projectDir}/atlases/chengAtlas.bed  > ${sample_name}.chengAtlas.region_modifications.tsv 
-        $params.mbtools region-frequency  ${sample_name}.merged.modifications.sorted.bam -r ${projectDir}/atlases/mossAtlas.bed  > ${sample_name}.mossAtlas.region_modifications.tsv 
+        $params.mbtools region-frequency  ${sample_name}.bam -r ${projectDir}/atlases/${atlas}Atlas.bed --cpg  --reference-genome ~/simpsonlab/data/references/GRCh38_no_alt_analysis_set.GCA_000001405.15.fna > ${sample_name}.${atlas}Atlas.region_modifications.tsv 
         """
 }
 process deconvolve {
@@ -228,19 +244,14 @@ process deconvolve {
     publishDir "deconvolution", mode: 'copy'
     
     input:
-        val mosstsv
-        val chengtsv
+        tuple(val(atlas), val(tsv))
     output:
-        tuple(path("deconv_output.chengAtlas.llse.tsv"),
-        path("deconv_output.chengAtlas.nnls.tsv"),
-        path("deconv_output.mossAtlas.llse.tsv"),
-        path("deconv_output.mossAtlas.nnls.tsv"))
+        tuple(path("${atlas}Atlas.llse.deconv_output.tsv"),
+        path("${atlas}Atlas.nnls.deconv_output.tsv"))
     shell:
     """
-    ${projectDir}/scripts/nanomix.py --model llse --atlas ${projectDir}/atlases/chengAtlas.tsv ${chengtsv.join(" ")} > "deconv_output.chengAtlas.llse.tsv"
-    ${projectDir}/scripts/nanomix.py --model nnls --atlas ${projectDir}/atlases/chengAtlas.tsv ${chengtsv.join(" ")} > "deconv_output.chengAtlas.nnls.tsv"
-    ${projectDir}/scripts/nanomix.py --model llse --atlas ${projectDir}/atlases/mossAtlas.tsv ${mosstsv.join(" ")} > "deconv_output.mossAtlas.llse.tsv"
-    ${projectDir}/scripts/nanomix.py --model nnls --atlas ${projectDir}/atlases/mossAtlas.tsv ${mosstsv.join(" ")} > "deconv_output.mossAtlas.nnls.tsv"
+    ${projectDir}/scripts/nanomix.py --model llse --atlas ${projectDir}/atlases/${atlas}Atlas.tsv ${tsv.join(" ")}  > "${atlas}Atlas.llse.deconv_output.tsv"
+    ${projectDir}/scripts/nanomix.py --model nnls --atlas ${projectDir}/atlases/${atlas}Atlas.tsv ${tsv.join(" ")} > "${atlas}Atlas.nnls.deconv_output.tsv"
     """
 }
 
@@ -256,7 +267,7 @@ process plot_deconvolution {
     """
     for f in ${deconv_outputs.join(" ")}
         do name=\$(echo \$f | sed s/.tsv/.png/g) 
-        ${projectDir}/scripts/plot_deconv.py \$f -name \$(basename \$name)
+        ${projectDir}/scripts/plot_deconv_berman.py \$f -s HU10,HU12,HU11,bc05,bc02,bc04,bc03,bc09,bc08,bc01,S1,bc11,bc10
     done
     """
 }
@@ -269,58 +280,28 @@ workflow pipeline {
         }else{
             basecall_output = get_basecall_reads(input)
         }
-        merge_fastq_output = merge_reads(
-            basecall_output.sample_name,
-            basecall_output.basecalled_directory
-        )   
-        index_output = nanopolish_index(
-            basecall_output.sample_name,
-            merge_fastq_output,
-            basecall_output.sequencing_summary,
-            basecall_output.run_directory
-        )
-        align_output = align_reads(
-            basecall_output.sample_name,
-            merge_fastq_output
-        )
-        bam_stats(
-            basecall_output.sample_name,
-            align_output.bam,
-            align_output.bai
-        )
-        chrs = Channel.from(1 .. 22).map { "chr" + it }
+        merge_fastq_output = merge_reads(basecall_output)   
+        index_output = nanopolish_index(merge_fastq_output)
+        align_output = align_reads(merge_fastq_output)
+        bam_stats(align_output)
+
+        chrs = Channel.from(1 .. 3).map { "chr" + it }
         chrs_sex = Channel.of("chrX", "chrY")
         chrs = chrs.concat(chrs_sex)
-        modbams = nanopolish_call_methylation(chrs,
-                        basecall_output.sample_name,
-                        merge_fastq_output,
-                        align_output.bam,
-                        align_output.bai,
-                        basecall_output.run_directory,
-                        index_output
-                        )
+        modbams = nanopolish_call_methylation(chrs, align_output.join(index_output))
         modbam_output = merge_bam(modbams.modbam.groupTuple())
-        read_frequency_output = read_modification_frequency(
-            modbam_output.sample_name,
-            modbam_output.modbam
-        )
-        fragmentation_output = fragmentation(
-            read_frequency_output.sample_name,
-            read_frequency_output.modtsv
-        )
+        read_frequency_output = read_modification_frequency(modbam_output)
+        fragmentation_output = fragmentation(read_frequency_output)
         plot_fragmentation(fragmentation_output.collect())
 
-        region_frequency_output = region_modification_frequency(
-            modbam_output.sample_name,
-            modbam_output.modbam,
-            )
-        deconv_output = deconvolve(region_frequency_output.chengtsv.collect(),
-                                   region_frequency_output.mosstsv.collect())
+        atlas = Channel.from("Berman", "moss", "cheng", "chengOrig")
+        region_frequency_output = region_modification_frequency(modbam_output, atlas)
+        deconv_output = deconvolve(region_frequency_output.tsv.groupTuple())
         plot_deconvolution(deconv_output)
 }
 
 workflow {
-    runs = Channel.fromPath( 'data/*', type: 'dir')
-    input = runs.map { [it.simpleName, it] }
+    input = Channel.fromPath( 'data/*', type: 'dir')
+        .map { [it.simpleName, it] }
     pipeline(input)
 }

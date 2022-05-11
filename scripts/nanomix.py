@@ -6,6 +6,7 @@ import sys
 import csv
 import os
 import pandas as pd
+import pyranges as pr
 
 from scipy.stats import binom
 from scipy.optimize import minimize, nnls, Bounds
@@ -14,18 +15,22 @@ script_dir = os.path.dirname(__file__)
 ATLAS = os.path.join(script_dir, '..', 'atlases', 'meth_atlas.csv')
 
 class ReferenceAtlas:
-    def __init__(self, filename):
+    def __init__(self, filename, covered_positions):
         self.cpg_ids = list()
         self.v = dict()
         self.K = None
+        self.covered_positions = covered_positions
 
         with open(filename) as csvfile:
             reader = csv.DictReader(csvfile, delimiter='\t')
             data = list()
             for row in reader:
-                chrom = row['chr']
-                start = row['start']
-                end = row['end']
+                chrom = row['chromosome']
+                start = int(row['start'])
+                end = int(row['end'])
+                cpg_id = (chrom, start, end)
+                if cpg_id not in self.covered_positions: continue
+                if cpg_id in self.cpg_ids: continue
                 self.cpg_ids.append((chrom, start, end))
                 cell_types = list(row.keys())[3:]
                 self.K = len(cell_types)
@@ -98,11 +103,11 @@ def fit_llse(atlas, sample, epsilon):
 def fit_nnls(atlas, sample):
 
     # add sum=1 constraint
-    t = np.array([1.0] * atlas.K).reshape( (1, K) )
+    t = np.array([1.0] * atlas.K).reshape( (1, atlas.K) )
     A = np.append(atlas.A, t, axis=0)
     b = np.append(sample.x_hat, [1.0], axis=0)
     res = nnls(A, b)
-    return res[0]
+    return res[0]/np.sum(res[0])
 
 def fit_nnls_constrained(atlas, sample):
     sigma_0 = np.array([ [ 1.0 / atlas.K ] * atlas.K ])
@@ -125,6 +130,13 @@ def fill_forward(x):
 
     return x
 
+def get_covered_positions(df):
+    positions = set()
+    for i, row in df.iterrows():
+        if row['total_calls'] > 0:
+            positions.add((row['Chromosome'],row['Start'],row['End']))
+    return positions
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--atlas', type=str,
@@ -137,7 +149,6 @@ def main():
     parser.add_argument('--epsilon', default=0.05)
     parser.add_argument('--fill', action='store_true')
     args = parser.parse_args()
-    atlas = ReferenceAtlas(args.atlas)
 
     Y = []
     sample_name = []
@@ -147,19 +158,22 @@ def main():
             df = pd.read_csv(input_file, sep='\t')
         except pd.errors.EmptyDataError:
             continue
+        df.drop_duplicates(inplace=True)
+        df.dropna(inplace=True)
+        df = df.rename(columns={'chromosome':'Chromosome',
+                                'start':'Start',
+                                'end':'End'})
+        df = pr.PyRanges(df).sort().df
         sample_name.append(get_sample_name(input_file))
-        m = np.array(df.modified_calls)
-        t = np.array(df.total_calls)
+        atlas = ReferenceAtlas(args.atlas, get_covered_positions(df))
+        t = np.array(df.num_called_reads)
         xhat = np.array(df.modification_frequency)
-        if args.fill:
-            xhat = fill_forward(xhat)
-        else:
-            xhat = np.nan_to_num(xhat)
+        m = np.rint((t * xhat))
 
         # convert to Samples and run
         s = Sample(args.name, xhat, m, t)
         if args.model == 'nnls':
-            Y.append(fit_nnls_constrained(atlas, s))
+            Y.append(fit_nnls(atlas, s))
         else:
             Y.append(fit_llse(atlas, s, args.epsilon))
     # output
