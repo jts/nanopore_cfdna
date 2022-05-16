@@ -267,7 +267,7 @@ process plot_deconvolution {
     """
     for f in ${deconv_outputs.join(" ")}
         do name=\$(echo \$f | sed s/.tsv/.png/g) 
-        ${projectDir}/scripts/plot_deconv_berman.py \$f -s HU10,HU12,HU11,bc05,bc02,bc04,bc03,bc09,bc08,bc01,S1,bc11,bc10
+        ${projectDir}/scripts/plot_deconv.py \$f 
     done
     """
 }
@@ -285,7 +285,7 @@ workflow pipeline {
         align_output = align_reads(merge_fastq_output)
         bam_stats(align_output)
 
-        chrs = Channel.from(1 .. 3).map { "chr" + it }
+        chrs = Channel.from(1 .. 22).map { "chr" + it }
         chrs_sex = Channel.of("chrX", "chrY")
         chrs = chrs.concat(chrs_sex)
         modbams = nanopolish_call_methylation(chrs, align_output.join(index_output))
