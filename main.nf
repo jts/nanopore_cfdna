@@ -196,7 +196,7 @@ process region_modification_frequency {
         tuple(val(atlas), path("${sample_name}.${atlas}Atlas.region_modifications.tsv"), emit: tsv)
     shell:
         """
-        $params.mbtools region-frequency  ${sample_name}.bam -r ${projectDir}/atlases/${atlas}Atlas.bed --cpg  --reference-genome ~/simpsonlab/data/references/GRCh38_no_alt_analysis_set.GCA_000001405.15.fna > ${sample_name}.${atlas}Atlas.region_modifications.tsv 
+        $params.mbtools region-frequency  ${sample_name}.bam -r ${projectDir}/atlases/${atlas}Atlas.bed --cpg  --reference-genome ~/simpsonlab/data/references/GRCh38_no_alt_analysis_set.GCA_000001405.15.fna -m 5 -c .33 > ${sample_name}.${atlas}Atlas.region_modifications.tsv 
         """
 }
 process deconvolve {
@@ -213,8 +213,8 @@ process deconvolve {
         path("${atlas}Atlas.nnls.deconv_output.tsv"))
     shell:
     """
-    ${projectDir}/scripts/nanomix.py --model llse --atlas ${projectDir}/atlases/${atlas}Atlas.tsv ${tsv.join(" ")}  > "${atlas}Atlas.llse.deconv_output.tsv"
-    ${projectDir}/scripts/nanomix.py --model nnls --atlas ${projectDir}/atlases/${atlas}Atlas.tsv ${tsv.join(" ")} > "${atlas}Atlas.nnls.deconv_output.tsv"
+    $params.nanomix --model llse --atlas ${projectDir}/atlases/${atlas}Atlas.tsv ${tsv.join(" ")}  > "${atlas}Atlas.llse.deconv_output.tsv"
+    $params.nanomix --model nnls --atlas ${projectDir}/atlases/${atlas}Atlas.tsv ${tsv.join(" ")} > "${atlas}Atlas.nnls.deconv_output.tsv"
     """
 }
 
@@ -230,7 +230,7 @@ process plot_deconvolution {
     """
     for f in ${deconv_outputs.join(" ")}
         do name=\$(echo \$f | sed s/.tsv/.png/g) 
-        ${projectDir}/scripts/plot_deconv_berman.py \$f -s HU10,HU12,HU11,bc05,bc02,bc04,bc03,bc09,bc08,bc01,S1,bc11,bc10
+        ${projectDir}/scripts/plot_deconv_berman.py \$f 
     done
     """
 }
@@ -238,7 +238,7 @@ workflow pipeline {
     take:
         input
     main:
-        atlas = Channel.from("Berman", "moss", "cheng", "chengOrig")
+        atlas = Channel.from("berman", "loyfer25", "loyfer250", "cheng")
         region_frequency_output = region_modification_frequency(input, atlas)
         deconv_output = deconvolve(region_frequency_output.tsv.groupTuple())
         plot_deconvolution(deconv_output)
