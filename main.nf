@@ -3,27 +3,6 @@
 
 nextflow.enable.dsl = 2
 
-process get_mergebam_output {
-    publishDir "${sample_name}_results", mode: 'symlink'
-
-    input:
-        tuple val(sample_name), file("run_directory")
-    output:
-        val sample_name, emit: sample_name
-        path "${sample_name}.merged.modifications.sorted.bam", emit: modbam
-    shell:
-    """
-    ln -s \$(find ${params.merge_bam_dir} -name ${sample_name}.merged.modifications.sorted.bam) ${sample_name}.merged.modifications.sorted.bam
-    """
-}
-process clean_bams {
-    input:
-        val sample_name
-    shell:
-    """
-    rm \$(find -type f | grep modifications.sorted.bam | grep chr | grep ${sample_name})
-    """
-}
 process downsample_modification_freq {
     memory '32 G'
     time '7d'
@@ -174,7 +153,7 @@ workflow pipeline {
 }
 
 workflow {
-    runs = Channel.fromPath( 'data/MMinden_*', type: 'dir')
+    runs = Channel.fromPath( 'data/*')
 
     // determine sample name for each input
     input = runs.map { [it.simpleName, it] }
