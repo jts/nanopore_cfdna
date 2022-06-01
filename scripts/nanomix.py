@@ -6,35 +6,19 @@ import sys
 import csv
 import os
 import pandas as pd
+import pyranges as pr
 
 from scipy.stats import binom
 from scipy.optimize import minimize, nnls, Bounds
 
 class ReferenceAtlas:
-    def __init__(self, filename):
-        self.cpg_ids = list()
-        self.v = dict()
-        self.K = None
-
-        with open(filename) as csvfile:
-            reader = csv.DictReader(csvfile, delimiter='\t')
-            data = list()
-            for row in reader:
-                chrom = row['chr']
-                start = row['start']
-                end = row['end']
-                self.cpg_ids.append((chrom, start, end))
-                cell_types = list(row.keys())[3:]
-                self.K = len(cell_types)
-                r = list()
-                for k in cell_types:
-                    if k not in self.v:
-                        self.v[k] = list()
-                    self.v[k].append(float(row[k]))
-                    r.append(float(row[k]))
-                data.append(r)
-
-        self.A = np.array(data).reshape((self.get_num_cpgs(), self.get_num_cell_types()))
+    def __init__(self, gr):
+        self.cpg_ids = [(chrom, start, end) for chrom, start, end in\
+                        zip(gr.Chromosome, gr.Start, gr.End)]
+        cell_types = list(gr.columns)[3:]
+        self.K = len(cell_types)
+        self.v = {k:list(gr[k]) for k in cell_types}
+        self.A = np.array(gr.loc[:, cell_types])
 
     def get_x(self, sigma):
         x = np.matmul(self.A, sigma)
@@ -95,11 +79,11 @@ def fit_llse(atlas, sample, epsilon):
 def fit_nnls(atlas, sample):
 
     # add sum=1 constraint
-    t = np.array([1.0] * atlas.K).reshape( (1, K) )
+    t = np.array([1.0] * atlas.K).reshape( (1, atlas.K) )
     A = np.append(atlas.A, t, axis=0)
     b = np.append(sample.x_hat, [1.0], axis=0)
     res = nnls(A, b)
-    return res[0]
+    return res[0]/np.sum(res[0])
 
 def fit_nnls_constrained(atlas, sample):
     sigma_0 = np.array([ [ 1.0 / atlas.K ] * atlas.K ])
@@ -110,17 +94,9 @@ def fit_nnls_constrained(atlas, sample):
     return res.x
 
 def get_sample_name(s):
-    s = s.split('_')[-1]
-    s = s.replace('.modifications.tsv', '')
+    s = s.split('/')[-1]
+    s = s.split('.')[0]
     return s
-def fill_forward(x):
-    prev = 0.0
-    for i in range(len(x)):
-        if np.isnan(x[i]):
-            x[i] = prev
-        prev = x[i]
-
-    return x
 
 def main():
     parser = argparse.ArgumentParser()
@@ -131,38 +107,46 @@ def main():
     parser.add_argument('input', nargs='+',
                         help='reference_modifications.tsv file')
     parser.add_argument('-o')
-    parser.add_argument('--epsilon', default=0.05)
+    parser.add_argument('--epsilon', default=0.05, type=float)
     parser.add_argument('--fill', action='store_true')
     args = parser.parse_args()
-    atlas = ReferenceAtlas(args.atlas)
 
     Y = []
     sample_name = []
+    columns={'chromosome':'Chromosome',
+                            'start':'Start',
+                            'end':'End'}
+    df_atlas = pd.read_csv(args.atlas, sep='\t').rename(columns=columns)
+    df_atlas.drop_duplicates(inplace=True)
+    gr_atlas = pr.PyRanges(df_atlas).sort()
     for input_file in args.input:
         # read input data from mbtools
         try:
-            df = pd.read_csv(input_file, sep='\t')
+            df = pd.read_csv(input_file, sep='\t').rename(columns=columns)
         except pd.errors.EmptyDataError:
             continue
-        sample_name.append(get_sample_name(input_file))
-        m = np.array(df.modified_calls)
-        t = np.array(df.total_calls)
-        xhat = np.array(df.modification_frequency)
-        if args.fill:
-            xhat = fill_forward(xhat)
-        else:
-            xhat = np.nan_to_num(xhat, 1.0)
+        df.drop_duplicates(inplace=True)
+        df.dropna(inplace=True)
+        gr_sample = pr.PyRanges(df).sort()
 
-        # convert to Samples and run
+        # Init atlas and sample
+        gr = gr_atlas.join(gr_sample)
+        atlas = ReferenceAtlas(gr.df.loc[:, gr_atlas.columns])
+        xhat = np.array(gr.modification_frequency)
+        t = np.array(gr.num_called_reads)
+        m = np.rint((t * xhat))
+        sample_name.append(get_sample_name(input_file))
         s = Sample(args.name, xhat, m, t)
+
+        # Run
         if args.model == 'nnls':
-            Y.append(fit_nnls_constrained(atlas, s))
+            Y.append(fit_nnls(atlas, s))
         else:
             Y.append(fit_llse(atlas, s, args.epsilon))
     # output
-    print("\t".join(['cell_type'] + sample_name))
+    print("\t".join(['ct'] + sample_name))
     for i, cell_type in enumerate(atlas.get_cell_types()):
-        print("\t".join([cell_type] + [str(y[i]) for y in Y]))
+        print("\t".join([cell_type] + [str(round(y[i],4)) for y in Y]))
 
 if __name__ == "__main__":
     main()

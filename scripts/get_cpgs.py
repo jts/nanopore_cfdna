@@ -12,7 +12,10 @@ import pandas as pd
 import numpy as np
 from time import perf_counter
 from tqdm import tqdm
+<<<<<<< HEAD
+=======
 import re
+>>>>>>> main
 
 script_dir = os.path.realpath(os.path.dirname(__file__))
 
@@ -57,11 +60,25 @@ def join_df(df_cpgloci, refmods, outfile,
     column_map = {'chromosome':'chr',
                 'position': 'pos',
                 'modified_frequency': 'freq'}
+<<<<<<< HEAD
+    if gDNA:
+        columns = ['chromosome', 'start', 'methylated_frequency']
+        column_map = {'chromosome':'chr',
+                'start': 'pos',
+                'methylated_frequency': 'freq'}
+=======
+>>>>>>> main
     if fill:
         f = open(f'{outfile}.log', 'w')
         f.write('sample_name\tmissing_cpgs\tfilled_cpgs\n')
 
     for refmod in refmods:
+<<<<<<< HEAD
+        sample_name = refmod.split('_results')[0]
+        if gDNA: sample_name = refmod.split('/')[1]
+        print(f'Loading {sample_name}...')
+        df_refmod = pd.read_csv(refmod, sep='\t', usecols=columns)
+=======
         sample_name = re.search('C\d*.*\dC', refmod)[0][1:-1]
         if sample_name in df.columns: continue
         print(f'Loading {sample_name}...')
@@ -70,6 +87,7 @@ def join_df(df_cpgloci, refmods, outfile,
         except pd.errors.EmptyDataError:
             continue
         print(df_refmod.head())
+>>>>>>> main
         df_refmod.rename(columns=column_map,
                             inplace=True)
         df_refmod['pos'] = df_refmod['pos'] + offset
@@ -79,8 +97,11 @@ def join_df(df_cpgloci, refmods, outfile,
             print(f'{na_count} NA CpGs found.\
                     Filling NA by Nearest Neighbour...')
             df_refmod = fill_NN(df_refmod, df_cpgloci)
+<<<<<<< HEAD
+=======
         else:
             df_refmod = df_cpgloci.join(df_refmod, how='inner')['freq']
+>>>>>>> main
 
         print('Joining dataframes...')
         df = df.join(df_refmod, how='left')

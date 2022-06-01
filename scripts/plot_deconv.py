@@ -76,14 +76,14 @@ def gen_bars_colors_hatches(nr_tissues):
     return colors_hatches_list + [((0, 0, 0, 1), None)]
 
 def g(x):
-    if x == 'cell_type':
+    if x == 'ct':
         return 0
     else:
         return 1/float(x)
 
 
 def f(x):
-    if x == 'cell_type':
+    if x == 'ct':
         return 0
     elif 'relapse' in x:
         x_new = "".join(x.split('_')[:2] + ['_'])
@@ -99,7 +99,6 @@ def plot_res(df, outpath, show=False):
 
     # df = hide_small_tissues(df)
     # df = hide_non_blood(df)
-    print(df)
     nr_tissues, nr_samples = df.shape
     print(df.shape)
 
@@ -125,9 +124,10 @@ def plot_res(df, outpath, show=False):
     plt.xlabel("sample")
     plt.xlim(-.6, nr_samples - .4)
 
+    plt.ylabel("Mixture Proportion")
     # Add a legend and a title
     plt.legend(loc='upper left', bbox_to_anchor=(1, 1), ncol=1)
-    plt.title('Deconvolution Results\n' + op.basename(outpath))
+    plt.title('Deconvolution Results\n'+ op.basename(outpath))
 
     # adjust layout, save and show
     plt.tight_layout(rect=[0, 0, .83, 1])
@@ -154,6 +154,8 @@ def main():
     df = pd.read_csv(args.input, sep='\t', index_col='ct')
     df = df.reindex(sorted(df.columns, key=g), axis=1)
     df = df.sort_values('6', ascending=False)
+    # df = df.reindex(sorted(df.columns), axis=1)
+    # df = df.sort_values('10', ascending=False)
 
     plot_res(df, args.name)
 
