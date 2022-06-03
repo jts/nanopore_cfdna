@@ -178,15 +178,20 @@ process plot_fragmentation {
     """
 }
 process compute_coverage {
+    input:
         tuple val(sample_name), val(modbam)
     output:
-        tuple val(sample_name), emit: sample_name
-            val(modbam), emit: modbam
-            stdout emit: sample_coverage
+        tuple val(sample_name),
+            val(modbam),
+            stdout
     shell:
     """
-    samtools coverage ${modbam} | head -n25 | tail -n24 | awk -F'\\t' '{sum+=\$7} END {print(sum/NR) }'
+    summary=~/jbroadbent/projects/methylation_deconvolution/pipeline_outputs/MLS/mls_dataset_summary.tsv
+    grep -w $sample_name \$summary | cut -f4 
     """
+    /*"""*/
+    /*samtools coverage ${modbam} | head -n25 | tail -n24 | awk -F'\\t' '{sum+=\$7} END {print(sum/NR) }'*/
+    /*"""*/
 }
 process region_modification_frequency {
     memory '32 G'
@@ -199,9 +204,9 @@ process region_modification_frequency {
     output:
         tuple(val(sample_name), val(atlas), path("${sample_name}.${atlas}Atlas.${cvrg}.region_modifications.tsv"), emit: tsv)
     shell:
-        """
-        $params.mbtools region-frequency  ${sample_name}.bam -r ${projectDir}/atlases/${atlas}Atlas.bed --cpg  --reference-genome ~/simpsonlab/data/references/GRCh38_no_alt_analysis_set.GCA_000001405.15.fna -s ${cvrg/orig_cvrg} > ${sample_name}.${atlas}Atlas.${cvrg}.region_modifications.tsv 
-        """
+    """
+    $params.mbtools region-frequency  ${sample_name}.bam -r ${projectDir}/atlases/${atlas}Atlas.bed --cpg  --reference-genome ~/simpsonlab/data/references/GRCh38_no_alt_analysis_set.GCA_000001405.15.fna -s ${(cvrg as float)/(orig_cvrg as float)} > ${sample_name}.${atlas}Atlas.${cvrg}.region_modifications.tsv 
+    """
 }
 process deconvolve {
     cpus params.threads
@@ -237,11 +242,11 @@ process plot_deconvolution {
         file "*.png"
     shell:
     """
-    ${projectDir}/scripts/plot_deconv_berman.py "${sample_name}.${atlas}Atlas.${model}.deconv_output.tsv" -n ${sample_name}.${atlas}Atlas.${model}.deconv_output.png
+    ${projectDir}/scripts/plot_deconv.py "${sample_name}.${atlas}Atlas.${model}.deconv_output.tsv" -name ${sample_name}.${atlas}Atlas.${model}.deconv_output.png
     """
 }
-process plot_accuracy {
-    publishDir "deconvolution", mode: 'copy'
+process plot_accuracy_by_atlas {
+    publishDir "deconvolution_loss/${atlas}", mode: 'copy'
 
     input:
         tuple val(sample_name),
@@ -249,10 +254,25 @@ process plot_accuracy {
             val(model),
             val(tsv)
     output:
-        path "deconvolution_loss.png"
+        path "deconvolution_loss.*${atlas}.png"
     shell:
     """
-    ${projectDir}/scripts/plot_accuracy.r ${tsv.join(" ")}
+    ${projectDir}/scripts/plot_accuracy.r ${tsv.join(" ")} ${atlas}
+    """
+}
+process plot_accuracy_by_model {
+    publishDir "deconvolution_loss/${model}", mode: 'copy'
+
+    input:
+        tuple val(sample_name),
+            val(atlas),
+            val(model),
+            val(tsv)
+    output:
+        path "deconvolution_loss.*${model}.png"
+    shell:
+    """
+    ${projectDir}/scripts/plot_accuracy.r ${tsv.join(" ")} ${model}
     """
 }
 workflow pipeline {
@@ -260,7 +280,7 @@ workflow pipeline {
         input
     main:
         cvrg = Channel.from([0.1,0.25,0.5,0.75,1,2,3,4,5,6,7,8,9,10,20])
-        atlas = Channel.from("berman", "loyfer25", "loyfer250", "cheng")
+        atlas = Channel.from("loyfer25","loyfer50","loyfer100","loyfer150","loyfer200","loyfer250")
         model = Channel.from("llse", "nnls")
         orig_cvrg = compute_coverage(input)
         region_frequency_output = region_modification_frequency(orig_cvrg, atlas, cvrg)
@@ -275,5 +295,6 @@ workflow {
     input = Channel.fromPath('data/*.bam', type: 'file')
         .map {[it.simpleName, it]}
     deconv_output = pipeline(input)
-    plot_accuracy(deconv_output.collect())
+    plot_accuracy_by_model(deconv_output.groupTuple(by: 2))
+    plot_accuracy_by_atlas(deconv_output.groupTuple(by: 1))
 }
