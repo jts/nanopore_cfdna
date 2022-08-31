@@ -5,10 +5,11 @@ import numpy as np
 import sys
 import csv
 import os
+import re
 import pandas as pd
 import pyranges as pr
 
-from scipy.stats import binom
+from scipy.stats import binom, dirichlet
 from scipy.optimize import minimize, nnls, Bounds
 
 script_dir = os.path.dirname(__file__)
@@ -18,7 +19,7 @@ class ReferenceAtlas:
     def __init__(self, gr):
         self.cpg_ids = [(chrom, start, end) for chrom, start, end in\
                         zip(gr.Chromosome, gr.Start, gr.End)]
-        cell_types = list(gr.columns)[3:]
+        cell_types = set(gr.columns) - {'Chromosome', 'Start', 'End', 'type'}
         self.K = len(cell_types)
         self.v = {k:list(gr[k]) for k in cell_types}
         self.A = np.array(gr.loc[:, cell_types])
@@ -43,25 +44,21 @@ class Sample:
         self.m = m
         self.t = t
 
-# Binomial model with sequencing errors, when epsilon = 0
+# Binomial model with sequencing errors, when p01 = 0
 # this is the same as the perfect data model
-def log_likelihood_sequencing_with_errors(atlas, sigma, sample, epsilon):
+def log_likelihood_sequencing_with_errors(atlas, sigma, sample, p01,p11=None):
     sigma_t = sigma.reshape( (atlas.K, 1) )
 
     # the solver we use can try values that are outside
     # the constraints we impose, we need to clip here to prevent
     # things from blowing up
     x = np.clip(np.ravel(atlas.get_x(sigma_t)), 0, 1.0)
-    p = x * (1 - epsilon) + (1 - x) * epsilon
+    if p11:
+        p = x * p11 + (1-x) * p01
+    else:
+        p = x * (1 - p01) + (1 - x) * p01
     b =  binom.logpmf(sample.m, sample.t, p)
 
-    #print("SigmaT", sigma_t)
-    #print("SigmaSum", np.sum(sigma_t))
-    #print("m", sample.m)
-    #print("t", sample.t)
-    #print("x", x)
-    #print("B", b)
-    #print("Sum", np.sum(b))
     return np.sum(b)
 
 def eq_constraint(x):
@@ -70,14 +67,27 @@ def eq_constraint(x):
 #
 # Model wrappers
 #
-def fit_llse(atlas, sample, epsilon):
-    sigma_0 = np.array([ [ 1.0 / atlas.K ] * atlas.K ])
-    f = lambda x: -1 * log_likelihood_sequencing_with_errors(atlas, x, sample, epsilon)
-
+def fit_llse(atlas, sample, p01, p11, random_inits):
+    f = lambda x: -1 * log_likelihood_sequencing_with_errors(atlas, x, sample, p01, p11)
     bnds = [ (0.0, 1.0) ] * atlas.K
     cons = ({'type': 'eq', 'fun': eq_constraint})
-    res = minimize(f, sigma_0, method='SLSQP', options={'maxiter': 10, 'disp':False}, bounds=bnds, constraints=cons)
-    return res.x
+    alpha = np.array([ 1.0 / atlas.K ] * atlas.K)
+    if random_inits:
+        n_trials = 10
+        best_ll = np.inf
+        best_sol = None
+        initializations = dirichlet.rvs(alpha, size=n_trials).tolist()
+
+        for (i, init) in enumerate(initializations):
+            res = minimize(f, init, method='SLSQP', options={'maxiter': 100, 'disp':False}, bounds=bnds, constraints=cons)
+            ll = res.get("fun")
+            if ll < best_ll:
+                best_ll = ll
+                best_sol = res
+        return best_sol.x/np.sum(best_sol.x)
+    else:
+        res = minimize(f, alpha, method='SLSQP', options={'maxiter': 100, 'disp':False}, bounds=bnds, constraints=cons)
+        return res.x / np.sum(res.x)
 
 def fit_nnls(atlas, sample):
 
@@ -98,34 +108,26 @@ def fit_nnls_constrained(atlas, sample):
 
 def get_sample_name(s):
     s = s.split('/')[-1]
-    s = s.split('.')[0]
-    return s
+    # label with coverage level
+    # return re.search("\.\d+(\.\d+)*", s)[0][1:]
+    return  s.split('.')[0]
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--atlas', type=str,
-            default='/.mounts/labs/simpsonlab/users/jbroadbent/code/cfdna/nanopore_cfdna/atlases/meth_atlas.csv')
-    parser.add_argument('--name', type=str, default='sample1')
-    parser.add_argument('--model', default='llse', type=str, help='deconvolution model options: [nnml, llse]')
-    parser.add_argument('input', nargs='+',
-                        help='reference_modifications.tsv file')
-    parser.add_argument('-o')
-    parser.add_argument('--epsilon', default=0.05, type=float)
-    parser.add_argument('--fill', action='store_true')
-    args = parser.parse_args()
-
+def deconvolve(methylomes, atlas, model, p01, p11, random_inits):
     Y = []
-    sample_name = []
-    columns={'chromosome':'Chromosome',
+    sample_names = []
+    columns={'chromosome':'Chromosome', 'chr':'Chromosome',
                             'start':'Start',
-                            'end':'End'}
-    df_atlas = pd.read_csv(args.atlas, sep='\t').rename(columns=columns)
+                            'end':'End',
+                            'start_position': 'Start',
+                            'end_position': 'End'}
+    df_atlas = pd.read_csv(atlas, sep='\t').rename(columns=columns)
     df_atlas.drop_duplicates(inplace=True)
+    df_atlas.dropna(inplace=True)
     gr_atlas = pr.PyRanges(df_atlas).sort()
-    for input_file in args.input:
-        # read input data from mbtools
+    for methylome in methylomes:
+        # read methylomes data from mbtools
         try:
-            df = pd.read_csv(input_file, sep='\t').rename(columns=columns)
+            df = pd.read_csv(methylome, sep='\t').rename(columns=columns)
         except pd.errors.EmptyDataError:
             continue
         df.drop_duplicates(inplace=True)
@@ -135,19 +137,91 @@ def main():
         # Init atlas and sample
         gr = gr_atlas.join(gr_sample)
         atlas = ReferenceAtlas(gr.df.loc[:, gr_atlas.columns])
-        xhat = np.array(gr.modification_frequency)
         t = np.array(gr.num_called_reads)
-        m = np.rint((t * xhat))
-        sample_name.append(get_sample_name(input_file))
-        s = Sample(args.name, xhat, m, t)
+        m = np.array((t * xhat))
+        name = get_sample_name(methylome)
+        sample_names.append(name)
+        s = Sample(name, xhat, m, t)
 
         # Run
-        if args.model == 'nnls':
+        if model == 'nnls':
             Y.append(fit_nnls(atlas, s))
+        elif model == 'llse':
+            Y.append(fit_llse(atlas, s, p01, p11, random_inits))
         else:
-            Y.append(fit_llse(atlas, s, args.epsilon))
-    # output
-    print("\t".join(['ct'] + sample_name))
+            Exception(f"no such model {model}")
+
+    return Y, sample_names, atlas
+
+def deconvolve_uxm(methylomes, atlas, model, p01, p11, random_inits):
+    Y = []
+    sample_names = []
+    columns={'chromosome':'Chromosome',
+                            'start':'Start',
+                            'end':'End'}
+    df_atlas = pd.read_csv(atlas, sep='\t').rename(columns=columns)
+    df_atlas.drop_duplicates(inplace=True)
+    gr_atlas = pr.PyRanges(df_atlas).sort()
+    for methylome in methylomes:
+        # read methylomes data from mbtools
+        try:
+            df = pd.read_csv(methylome, sep='\t').rename(columns=columns)
+        except pd.errors.EmptyDataError:
+            continue
+        df.drop_duplicates(inplace=True)
+        df.dropna(inplace=True)
+        gr_sample = pr.PyRanges(df).sort()
+
+        # Init atlas and sample
+        gr = gr_atlas.join(gr_sample)
+        atlas = ReferenceAtlas(gr.df.loc[:, gr_atlas.columns])
+
+        # Combine U/M reads into methylome
+        breakpoint()
+        u_reads = (np.array(gr.type) == 'U')*np.array(gr.u_reads)
+        m_reads = (np.array(gr.type) == 'M')*np.array(gr.m_reads)
+        um_reads = u_reads + m_reads
+        # sanity check
+        if any(um_reads > m_reads): Exception("Error in U/M read masking")
+
+        # Init sample
+        t = np.array(gr.num_called_reads)
+        name = get_sample_name(methylome)
+        sample_names.append(name)
+        s = Sample(name, um_reads, um_reads, t)
+        atlas.A = np.dot(np.diag(t), atlas.A)
+
+        # Run
+        if model == 'nnls':
+            # Scale atlas by coverage in each position
+            Y.append(fit_nnls(atlas, s))
+        elif model == 'llse':
+            Y.append(fit_llse(atlas, s, p01, p11, True))
+        else:
+            Exception(f"no such model {model}")
+
+    return Y, sample_names, atlas
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--atlas', type=str,
+            default='/.mounts/labs/simpsonlab/users/jbroadbent/code/cfdna/nanopore_cfdna/atlases/meth_atlas.csv')
+    parser.add_argument('--name', type=str, default='sample1')
+    parser.add_argument('--model', default='llse', type=str, help='deconvolution model options: [nnml, llse]')
+    parser.add_argument('input', nargs='+',
+                        help='reference_modifications.tsv file')
+    parser.add_argument('--p01', default=0.0909, type=float)
+    parser.add_argument('--p11', default=None, type=float)
+    parser.add_argument('--random_inits', action='store_true')
+    parser.add_argument('--uxm', action='store_true', help='Loyfer UXM deconvolution method')
+    args = parser.parse_args()
+
+    if args.uxm:
+        Y, sample_names, atlas = deconvolve_uxm(args.input, args.atlas, args.model, args.p01, args.p11, args.random_inits)
+    else:
+        Y, sample_names, atlas = deconvolve(args.input, args.atlas, args.model, args.p01, args.p11, args.random_inits)
+
+    print("\t".join(['ct'] + sample_names))
     for i, cell_type in enumerate(atlas.get_cell_types()):
         print("\t".join([cell_type] + [str(round(y[i],4)) for y in Y]))
 

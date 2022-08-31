@@ -27,7 +27,7 @@ OTHERS_THRESH = 0.05
 #       Plotting methods           #
 ####################################
 def hide_non_blood(df):
-    blood_cells = ['tcell', 'erythroblast', 'nkcell', 'bcell', 'progenitor', 'hsc', 'monocyte', 'macrophage', 'eosinophil', 'neutrophil']
+    blood_cells = ['tcell', 'erythroblast', 'nkcell', 'bcell', 'progenitor', 'hsc', 'monocyte', 'macrophage', 'eosinophil', 'neutrophil', 'Erythrocyte progenitors', 'B-cells EPIC','CD4T-cells EPIC','CD8T-cells EPIC','Neutrophils EPIC','Monocytes EPIC','NK-cells EPIC','B-cell','T-cell','erythrocyte_progenitor','granulocyte']
     selection = [name not in blood_cells for name in df.index]
     others = df[selection].sum()
     df = df.drop(df.index[tuple([selection])])
@@ -55,25 +55,29 @@ def gen_bars_colors_hatches(nr_tissues):
     the last tuple is for the 'other' category, and is always black with no hatch.
     :return: a list of tuples, with length == nr_tissues
     """
-    matplotlib.rcParams['hatch.linewidth'] = 0.3
-    hatches = [None, 'xxx', '...', 'O', '++'][:nr_tissues // 7]
-
-    nr_colors = int(math.ceil(nr_tissues / len(hatches)) + 1)
-    print(nr_colors, hatches)
-
-    # generate bars colors:
     cmap = matplotlib.cm.get_cmap(COLOR_MAP)
-    norm = matplotlib.colors.Normalize(vmin=0.0, vmax=float(nr_colors))
-    colors = [cmap(norm(k)) for k in range(nr_colors)]
-    # for c in range(nr_colors): print(norm(c), cmap(norm(c)), cmap(c))
+    if nr_tissues < 7:
+        norm = matplotlib.colors.Normalize(vmin=0.0, vmax=float(nr_tissues))
+        return [(cmap(norm(k)), None) for k in range(nr_tissues -1)] + [((0, 0, 0, 1), None)]
+    else:
+        matplotlib.rcParams['hatch.linewidth'] = 0.3
+        hatches = [None, 'xxx', '...', 'O', '++'][:nr_tissues // 7]
 
-    def get_i_bar_tuple(i):
-        color_ind = i % nr_colors
-        hatch_ind = int(i // math.ceil(nr_tissues / len(hatches)))
-        return colors[color_ind], hatches[hatch_ind]
+        nr_colors = int(math.ceil(nr_tissues / len(hatches)) + 1)
+        print(nr_colors, hatches)
 
-    colors_hatches_list = [get_i_bar_tuple(i) for i in range(nr_tissues-1)]
-    return colors_hatches_list + [((0, 0, 0, 1), None)]
+        # generate bars colors:
+        norm = matplotlib.colors.Normalize(vmin=0.0, vmax=float(nr_colors))
+        colors = [cmap(norm(k)) for k in range(nr_colors)]
+        # for c in range(nr_colors): print(norm(c), cmap(norm(c)), cmap(c))
+
+        def get_i_bar_tuple(i):
+            color_ind = i % nr_colors
+            hatch_ind = int(i // math.ceil(nr_tissues / len(hatches)))
+            return colors[color_ind], hatches[hatch_ind]
+
+        colors_hatches_list = [get_i_bar_tuple(i) for i in range(nr_tissues-1)]
+        return colors_hatches_list + [((0, 0, 0, 1), None)]
 
 def g(x):
     if x == 'ct':
@@ -152,6 +156,9 @@ def main():
     args = parser.parse_args()
 
     df = pd.read_csv(args.input, sep='\t', index_col='ct')
+    df = df.reindex(sorted(df.columns, key=f), axis=1)
+    df.sort_index(inplace=True)
+    # df = df.sort_values('20', ascending=False)
     # df = df.reindex(sorted(df.columns), axis=1)
     # df = df.sort_values('10', ascending=False)
 

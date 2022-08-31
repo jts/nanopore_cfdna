@@ -188,33 +188,43 @@ process plot_fragmentation {
 process region_modification_frequency {
     memory '32 G'
     time '7d'
-    publishDir "modifications/region_frequency", mode: 'copy'
+    publishDir "modifications/read_frequency", mode: 'copy'
+    cache 'lenient'
     input:
-        tuple val(sample_name), file("${sample_name}.bam")
+        tuple val(sample_name), path("${sample_name}.bam")
         each atlas
     output:
-        tuple(val(atlas), path("${sample_name}.${atlas}Atlas.region_modifications.tsv"), emit: tsv)
+        tuple(val(sample_name), val(atlas), path("${sample_name}.${atlas}Atlas.read_modifications.tsv"), emit: tsv)
     shell:
         """
-        $params.mbtools region-frequency  ${sample_name}.bam -r ${projectDir}/atlases/${atlas}Atlas.bed --cpg  --reference-genome ~/simpsonlab/data/references/GRCh38_no_alt_analysis_set.GCA_000001405.15.fna -m 5 -c .33 > ${sample_name}.${atlas}Atlas.region_modifications.tsv 
+        bedtools intersect -abam ${sample_name}.bam -b ${projectDir}/atlases/${atlas}Atlas.bed > ${sample_name}.${atlas}.intersect.bam
+        $params.mbtools read-frequency  ${sample_name}.${atlas}.intersect.bam --cpg  -g ~/simpsonlab/data/references/GRCh38_no_alt_analysis_set.GCA_000001405.15.fna \
+                | cut -f2,3,4,8,9 > ${sample_name}.${atlas}Atlas.read_modifications.tsv 
         """
 }
-process deconvolve {
+process deconvolute {
     cpus params.threads
     memory '32 G'
     time '1d'
 
+    label 'parallel'
+
     publishDir "deconvolution", mode: 'copy'
     
     input:
-        tuple(val(atlas), val(tsv))
+        tuple(val(sample_name), val(atlas), val(tsv))
     output:
-        tuple(path("${atlas}Atlas.llse.deconv_output.tsv"),
-        path("${atlas}Atlas.nnls.deconv_output.tsv"))
+        tuple val(atlas),
+        path("${atlas}Atlas.llse_em.deconv_output.tsv")
     shell:
     """
-    $params.nanomix --model llse --atlas ${projectDir}/atlases/${atlas}Atlas.tsv ${tsv.join(" ")}  > "${atlas}Atlas.llse.deconv_output.tsv"
-    $params.nanomix --model nnls --atlas ${projectDir}/atlases/${atlas}Atlas.tsv ${tsv.join(" ")} > "${atlas}Atlas.nnls.deconv_output.tsv"
+    ~/jbroadbent/code/cfdna/nanomix_em/target/release/nanomix_em deconvolute \
+            ${tsv.join(" ")} \
+            --atlas ${projectDir}/atlases/${atlas}Atlas.tsv \
+            --p01 0.0909 --p11 0.949\
+            --max_iter 300\
+            --min_proportion 0.015\
+            --stop_thresh 0.001 > "${atlas}Atlas.llse_em.deconv_output.tsv"
     """
 }
 
@@ -223,25 +233,23 @@ process plot_deconvolution {
     publishDir "deconvolution", mode: 'copy'
 
     input:
-        val deconv_outputs
+        tuple val(atlas),
+        path("${atlas}Atlas.llse_em.deconv_output.tsv")
     output:
         file "*.png"
     shell:
     """
-    for f in ${deconv_outputs.join(" ")}
-        do name=\$(echo \$f | sed s/.tsv/.png/g) 
-        ${projectDir}/scripts/plot_deconv_berman.py \$f 
-    done
+    ${projectDir}/scripts/plot_deconv.py "${atlas}Atlas.llse_em.deconv_output.tsv" -name ${atlas}Atlas.llse_em.deconv_output.png
     """
 }
 workflow pipeline {
     take:
         input
     main:
-        atlas = Channel.from("berman", "loyfer25", "loyfer250", "cheng")
+        atlas = Channel.from("berman", "loyfer250")
         region_frequency_output = region_modification_frequency(input, atlas)
-        deconv_output = deconvolve(region_frequency_output.tsv.groupTuple())
-        plot_deconvolution(deconv_output)
+        deconv_output = deconvolute(region_frequency_output.groupTuple(by: 1))
+        plot_deconvolution(deconv_output.groupTuple(by: [1, 2] ))
 }
 
 workflow {
