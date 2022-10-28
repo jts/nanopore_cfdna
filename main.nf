@@ -3,249 +3,164 @@
 
 nextflow.enable.dsl = 2
 
-process merge_reads {
-    cpus 1
-    memory '1 G'
-
-    input: 
-        val sample_name
-        file basecall_directory
-    output:
-        file "merged_reads/${sample_name}.fastq"
-    shell:
-    """
-    mkdir -p merged_reads
-    fastcat -x ${basecall_directory} > merged_reads/${sample_name}.fastq
-    """
-}
-process basecall_reads {
-    label 'GPU'
-
-    memory '16 G'
-    cpus params.threads
-    time '3d'
-    queue 'gpu.q'
-
-    input:
-        tuple val(sample_name), file(run_directory)
-    output:
-        val sample_name, emit: sample_name
-        path run_directory, emit: run_directory
-        path "basecalled", emit: basecalled_directory
-        path "basecalled/sequencing_summary.txt", emit: sequencing_summary
-    shell:
-    """
-    $params.guppy -r --num_callers $task.cpus --gpu_runners_per_device 4 --chunks_per_runner 512 -c $params.guppy_model -i $run_directory -x "cuda:0 cuda:1" -s basecalled
-    """
-}
-process align_reads {
-    cpus params.threads
-    memory '32 G'
-
-    publishDir "alignments", mode: 'symlink'
-    input:
-        val sample_name
-        file "${sample_name}.fastq"
-    output:
-        path "${sample_name}.sorted.bam", emit: bam
-        path "${sample_name}.sorted.bam.bai", emit: bai
-    shell:
-    """
-    minimap2 -ax map-ont -t $task.cpus $params.reference ${sample_name}.fastq | samtools sort -T tmp > ${sample_name}.sorted.bam
-    samtools index ${sample_name}.sorted.bam
-    """
-}
-process bam_stats {
+process simulate {
     memory '32 G'
     time '1d'
 
-    publishDir "alignments", mode: 'symlink'
+    publishDir "methylomes", mode: 'copy'
 
     input:
-        val sample_name
-        file "${sample_name}.sorted.bam"
-        file "${sample_name}.sorted.bam.bai"
-    output:
-        path "${sample_name}.bamstats.tsv", emit: stats
-    shell:
-    """
-    stats_from_bam ${sample_name}.sorted.bam -o ${sample_name}.bamstats.tsv
-    """
-}
-process nanopolish_index {
-    time '1d'
-    memory '24 G'
-
-    input:
-        val sample_name
-        file "${sample_name}.fastq"
-        file "sequencing_summary.txt"
-        file "run_directory"
-    output:
-        tuple file("${sample_name}.fastq.index"), file("${sample_name}.fastq.index.gzi"), file("${sample_name}.fastq.index.fai"), file("${sample_name}.fastq.index.readdb")
-    shell:
-    """
-    $params.nanopolish index -s sequencing_summary.txt -d run_directory ${sample_name}.fastq
-    """
-}
-
-process nanopolish_call_methylation {
-    cpus params.threads
-    memory '32 G'
-    time '7d'
-    
-    input:
-        each chr
-        val sample_name
-        file "${sample_name}.fastq"
-        file "${sample_name}.sorted.bam"
-        file "${sample_name}.sorted.bam.bai"
-        file "run_directory"
-        tuple file("${sample_name}.fastq.index"),
-            file("${sample_name}.fastq.index.gzi"),
-            file("${sample_name}.fastq.index.fai"),
-            file("${sample_name}.fastq.index.readdb")
-    output:
-        tuple( val(sample_name), path("${sample_name}.${chr}.modifications.sorted.bam"), emit: modbam)
-    shell:
-    """
-    $params.nanopolish call-methylation -b ${sample_name}*.bam -r ${sample_name}.fastq -g $params.reference -w ${chr} --modbam-output ${sample_name}.${chr}.modifications.sorted.bam -t $task.cpus
-    """
-}
-process merge_bam {
-    cpus params.threads
-    memory '32 G'
-    time '1d'
-    
-    publishDir "modifications/bams", mode: 'copy'
-
-    input:
-        tuple( val(sample_name), val(bams) )
-    output:
-        val sample_name, emit: sample_name
-        path "${sample_name}.merged.modifications.sorted.bam", emit: modbam
-    shell:
-    """
-    samtools merge -o ${sample_name}.merged.modifications.sorted.bam ${bams.join(' ')} --threads $params.threads
-    """
-}
-process read_modification_frequency {
-    cpus params.threads
-    memory '32 G'
-    time '1d'
-    
-    publishDir "modifications/read_frequency", mode: 'symlink'
-
-    input:
-        val sample_name
-        file "${sample_name}.merged.modifications.sorted.bam"
-    output:
-        val sample_name , emit: sample_name
-        path "${sample_name}.read_modifications.tsv", emit: modtsv
-    shell:
-    """
-        $params.mbtools read-frequency  ${sample_name}.merged.modifications.sorted.bam  > ${sample_name}.read_modifications.tsv 
-    """
-}
-process clean_bams {
-    input:
-        val sample_name
-    shell:
-    """
-    rm \$(find -type f | grep modifications.sorted.bam | grep chr | grep ${sample_name})
-    """
-}
-process fragmentation {
-    cpus params.threads
-    memory '32 G'
-    time '1d'
-
-    publishDir "fragmentation", mode: 'symlink'
-    
-    input:
-        val sample_name
-        file "${sample_name}.read_modifications.tsv"
-    output:
-        file "${sample_name}.fragmentation.ratios.tsv"
-    shell:
-    """
-    ${projectDir}/scripts/fragmentation.py -o ${sample_name}.fragmentation.ratios.tsv -s 100 151 -l 151 221 -b 5000000 ${sample_name}.read_modifications.tsv
-    """
-}
-process plot_fragmentation {
-    publishDir "fragmentation", mode: 'copy'
-
-    input:
-        val fragmentomes
-    output:
-        file "*fragmentome.pdf"
-    shell:
-
-    """
-    ${projectDir}/scripts/plot_fragmentome.r ${fragmentomes.join(" ")}
-    """
-}
-process region_modification_frequency {
-    memory '32 G'
-    time '7d'
-    publishDir "modifications/region_frequency", mode: 'copy'
-    input:
-        tuple val(sample_name), file("${sample_name}.bam")
+        each coverage
+        each p01
+        each p11
+        each lung_proportion
         each atlas
+        each repeat
     output:
-        tuple(val(atlas), path("${sample_name}.${atlas}Atlas.region_modifications.tsv"), emit: tsv)
+        val coverage
+        val p01
+        val p11
+        val lung_proportion
+        val atlas
+        val repeat
+        path "${coverage}-${p01}-${p11}-${lung_proportion}-${atlas}-methylome.tsv"
     shell:
+    if ( atlas == "bermanAtlas")
         """
-        $params.mbtools region-frequency  ${sample_name}.bam -r ${projectDir}/atlases/${atlas}Atlas.bed --cpg  --reference-genome ~/simpsonlab/data/references/GRCh38_no_alt_analysis_set.GCA_000001405.15.fna -m 5 -c .33 > ${sample_name}.${atlas}Atlas.region_modifications.tsv 
+        nanomix_em simulate --atlas ${projectDir}/atlases/${atlas}.tsv --p01 $p01 --p11 $p11 --coverage $coverage --lung_proportion $lung_proportion\
+                --region_size 1 \
+                --name "${coverage}-${p01}-${p11}-${lung_proportion}-${atlas}-methylome.tsv"
+        """
+    else
+        """
+        nanomix_em simulate --atlas ${projectDir}/atlases/${atlas}.tsv --p01 $p01 --p11 $p11 --coverage $coverage --lung_proportion $lung_proportion\
+                --region_size 5 \
+                --name "${coverage}-${p01}-${p11}-${lung_proportion}-${atlas}-methylome.tsv"
         """
 }
-process deconvolve {
+process deconvolute {
     cpus params.threads
-    memory '32 G'
+    memory '64 G'
     time '1d'
 
     publishDir "deconvolution", mode: 'copy'
     
     input:
-        tuple(val(atlas), val(tsv))
+        val coverage
+        val p01
+        val p11
+        val lung_proportion
+        val atlas
+        val repeat
+        path "${coverage}-${p01}-${p11}-${lung_proportion}-${atlas}-methylome.tsv"
+        each model
+        each init_sigma
     output:
-        tuple(path("${atlas}Atlas.llse.deconv_output.tsv"),
-        path("${atlas}Atlas.nnls.deconv_output.tsv"))
-    shell:
-    """
-    $params.nanomix --model llse --atlas ${projectDir}/atlases/${atlas}Atlas.tsv ${tsv.join(" ")}  > "${atlas}Atlas.llse.deconv_output.tsv"
-    $params.nanomix --model nnls --atlas ${projectDir}/atlases/${atlas}Atlas.tsv ${tsv.join(" ")} > "${atlas}Atlas.nnls.deconv_output.tsv"
-    """
+        tuple val(coverage),
+        val(p01),
+        val(p11),
+        val(lung_proportion),
+        val(atlas),
+        val(init_sigma),
+        (stdout)
+    script:
+    if ( model == 'mmse' )
+        """
+        head -n1 ${coverage}-${p01}-${p11}-${lung_proportion}-${atlas}-methylome.tsv > header.tsv
+        tail -n+2 ${coverage}-${p01}-${p11}-${lung_proportion}-${atlas}-methylome.tsv | bedtools merge -c 4,5 -o sum -i - | cat header.tsv - | cut -f1-5 > aggregated_methylome.tsv
+        nanomix.py --model $init_sigma --atlas ${projectDir}/atlases/${atlas}.tsv aggregated_methylome.tsv --p11 $p11 --p01 $p01 > init_sigma.tsv
+
+        nanomix_em deconvolute --atlas ${projectDir}/atlases/${atlas}.tsv  \
+                --methylome ${coverage}-${p01}-${p11}-${lung_proportion}-${atlas}-methylome.tsv \
+                --p01 $p01 --p11 $p11 --max_iter 2000 --stop_thresh 0.00002 --min_proportion 0.02 --sigma init_sigma.tsv \
+                > output.tsv
+                grep lung -i output.tsv| grep alveolar -i -v| cut -f2 | head -n1
+        """
+                /*grep log-likelihood output.tsv | cut -f2*/
+    else
+        """
+        head -n1 ${coverage}-${p01}-${p11}-${lung_proportion}-${atlas}-methylome.tsv > header.tsv
+        tail -n+2 ${coverage}-${p01}-${p11}-${lung_proportion}-${atlas}-methylome.tsv | bedtools merge -c 4,5 -o sum -i - | cat header.tsv - | cut -f1-5 > aggregated_methylome.tsv
+        nanomix.py --model $model --atlas ${projectDir}/atlases/${atlas}.tsv  \
+                aggregated_methylome.tsv\
+                --p11 $p11 --p01 $p01 --random_inits \
+                > output.tsv
+                grep lung -i output.tsv| grep alveolar -i -v| cut -f2 |  head -n1
+        """
 }
+process init_sigma {
+    input:
+        val coverage
+        val p01
+        val p11
+        val lung_proportion
+        val atlas
+        val repeat
+        path "${coverage}-${p01}-${p11}-${lung_proportion}-${atlas}-methylome.tsv"
+        each init
+    output:
+        path "init_sigma.tsv"
+    script:
+        """
+        head -n1 ${coverage}-${p01}-${p11}-${lung_proportion}-${atlas}-methylome.tsv > header.tsv
+        tail -n+2 ${coverage}-${p01}-${p11}-${lung_proportion}-${atlas}-methylome.tsv | bedtools merge -c 4,5 -o sum -i - | cat header.tsv - | cut -f1-5 > aggregated_methylome.tsv
+        nanomix.py --model $init --atlas ${projectDir}/atlases/${atlas}.tsv aggregated_methylome.tsv --p11 $p11 --p01 $p01 > init_sigma.tsv
+        """
+}
+process evaluate_deconv {
+    cpus params.threads
+    memory '64 G'
+    time '1d'
 
-process plot_deconvolution {
-
-    publishDir "deconvolution", mode: 'copy'
+    publishDir "class_probs/${coverage}-${p01}-${p11}-${lung_proportion}-${atlas}-methylome/exp${repeat}", mode: 'copy'
+    
+    input:
+        val coverage
+        val p01
+        val p11
+        val lung_proportion
+        val atlas
+        val repeat
+        path "${coverage}-${p01}-${p11}-${lung_proportion}-${atlas}-methylome.tsv"
+        each init_sigma
+    output:
+        path "sigma.tsv"
+        path "class_probs.tsv"
+        path "incorrect_assignments.tsv"
+    shell:
+        """
+        nanomix_em evaluate --atlas ${projectDir}/atlases/${atlas}.tsv  \
+                --methylome ${coverage}-${p01}-${p11}-${lung_proportion}-${atlas}-methylome.tsv \
+                --p01 $p01 --p11 $p11 --stop_thresh 0.000005 --min_proportion 0.02 --sigma ${init_sigma}
+        """
+}
+process plot_deconvolution_loss {
+    publishDir "plots", mode: 'copy'
 
     input:
-        val deconv_outputs
+        file lung_proportion  
     output:
-        file "*.png"
-    shell:
+        path "*deconvolution_loss.png"
+    script:
     """
-    for f in ${deconv_outputs.join(" ")}
-        do name=\$(echo \$f | sed s/.tsv/.png/g) 
-        ${projectDir}/scripts/plot_deconv_berman.py \$f 
-    done
+    ${projectDir}/scripts/plot_deconv_loss.r ${lung_proportion}
     """
 }
-workflow pipeline {
-    take:
-        input
-    main:
-        atlas = Channel.from("berman", "loyfer25", "loyfer250", "cheng")
-        region_frequency_output = region_modification_frequency(input, atlas)
-        deconv_output = deconvolve(region_frequency_output.tsv.groupTuple())
-        plot_deconvolution(deconv_output)
-}
-
 workflow {
-    input = Channel.fromPath('data/*.bam', type: 'file')
-        .map {[it.simpleName, it, ]}
-    pipeline(input)
+    coverage = Channel.from(0.1, 0.5, 1.0, 5.0, 10.0)
+    p01 = Channel.from(0..5).map {it/100}
+    p11 = Channel.from(100..95).map {it/100}
+    repeats = Channel.from(0..4)
+    true_lung_proportion = Channel.from(0.3)
+    atlas = Channel.from("bermanAtlas")
+    model = Channel.from("mmse")
+    init = Channel.from("llse", "nnls", "null")
+    lung_proportion = file("lung_proportion.tsv")
+    lung_proportion.text = "coverage\tp01\tp11\ttrue_lung_proportion\tatlas\tinit_sigma\tlung_proportion\n"
+
+    methylome = simulate(coverage, p01, p11, true_lung_proportion, atlas, repeats)
+    /*evaluate_deconv(methylome, init_sigma)*/
+    mixture = deconvolute(methylome, model, init)
+    mixture.subscribe { assert it.size() == 7
+                        lung_proportion.append(it.join("\t")) }
 }
