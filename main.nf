@@ -1,6 +1,6 @@
 #!/usr/bin/env nextflow
 // Structure based on https://github.com/epi2me-labs/wf-template/blob/master/main.nf
-
+import groovy.json.JsonBuilder
 nextflow.enable.dsl = 2
 process BASECALL {
     debug true
@@ -20,7 +20,7 @@ process BASECALL {
         tuple val(sample_name), path("basecalled")
     shell:
     """	
-    $params.guppy --recursive --compress_fastq --align_ref $params.reference  --num_callers $task.cpus --gpu_runners_per_device 5 --chunks_per_runner 512 -c $params.guppy_model -i $run_directory -x "cuda:0 cuda:1" -s basecalled --bam_out
+    $params.guppy --recursive --compress_fastq --align_ref $params.reference  --num_callers $task.cpus --gpu_runners_per_device 5 --chunks_per_runner 512 -c $params.guppy_nanomix_model -i $run_directory -x "cuda:0 cuda:1" -s basecalled --bam_out
     """
 }
 process MERGE_BAM {
@@ -57,12 +57,14 @@ process MBTOOLS {
     """
     mbtools read-region-frequency \
         -r $params.atlas \
+        --cpg \
+        -g $params.reference \
+        -f $params.read_end_filter \
         $bam > ${name}.methylome.tsv
     """
 }
 process DECONVOLUTE {
     publishDir "${launchDir}/mixture_proportions", mode: 'symlink'
-    conda '/.mounts/labs/simpsonlab/sw/miniconda3/envs/nanomix_buildnode'
     cpus params.threads
 
     tag "$name"
@@ -70,7 +72,7 @@ process DECONVOLUTE {
     input:
         tuple val(methylome), val(name)
     output:
-        tuple path("*sigma.tsv"), val(name)
+        path("*sigma.tsv")
     shell:
     """
     nanomix deconvolute \
@@ -78,7 +80,7 @@ process DECONVOLUTE {
         -@ $task.cpus \
         -nt $params.num_trials \
         --concentration $params.concentration \
-        --model $params.model \
+        --model $params.nanomix_model \
         --nnls_init \
         -p11 $params.p11 \
         -p01 $params.p01 \
@@ -90,10 +92,9 @@ process DECONVOLUTE {
 }
 process PLOT {
     publishDir "${launchDir}/plots", mode: 'symlink'
-    conda '/.mounts/labs/simpsonlab/sw/miniconda3/envs/nanomix_buildnode'
 
     input:
-        tuple val(sigmas), val(name)
+        val(sigmas)
     output:
         path "*.png"
     shell:
@@ -130,7 +131,12 @@ workflow deconvolute {
         PLOT(DECONVOLUTE.out.collect())
 }
 
+// entrypoint workflow
+WorkflowMain.initialise(workflow, params, log)
 workflow {
+    if (params.disable_ping == false) {
+        Pinguscript.ping_post(workflow, "start", "none", params.out_dir, params)
+    }
     // Check if BAM files have been generated for input samples
     // If not, run basecalling
     Channel.fromPath('data/*', type: 'dir')
@@ -151,4 +157,20 @@ workflow {
     basecall(basecall_input)
         .set { basecalled }
     deconvolute( modbam_input.concat(basecalled) )
+
+    /*software_versions = getVersions()*/
+    /*workflow_params = getParams()*/
+    /*report = makeReport(*/
+        /*metadata, software_versions.collect(), workflow_params*/
+        /*)*/
 }
+if (params.disable_ping == false) {
+    workflow.onComplete {
+        Pinguscript.ping_post(workflow, "end", "none", params.out_dir, params)
+    }
+
+    workflow.onError {
+        Pinguscript.ping_post(workflow, "error", "$workflow.errorMessage", params.out_dir, params)
+    }
+}
+

@@ -1,0 +1,69 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema",
+  "$id": "https://raw.githubusercontent.com/./master/nextflow_schema.json",
+  "title": ". pipeline parameters",
+  "description": "",
+  "type": "object",
+  "properties": {
+    "threads": {
+      "type": "integer",
+      "default": 1,
+      "description": "Number of threads to use in parallel processes"
+    },
+    "p01": {
+      "type": "number",
+      "default": 0.0182,
+      "description": "Nanopore overcall error rate"
+    },
+    "p11": {
+      "type": "number",
+      "default": 0.996,
+      "description": "Nanopore correct call error rate"
+    },
+    "min_proportion": {
+      "type": "number",
+      "default": 0.01,
+      "description": "Minimum proportion for a cell type in mixture proportion"
+    },
+    "concentration": {
+      "type": "number",
+      "default": 5.0,
+      "description": "Dirichlet alpha parameter for LLSE initialization"
+    },
+    "read_end_filter": {
+      "type": "number",
+      "default": 25,
+      "description": "Number of bases to ignore at the end of a read. Modification calls at the end of a read are often unreliable due to end repair."
+    },
+    "nanomix_model": {
+      "type": "string",
+      "default": "llse",
+      "description": "Deconvolution model. [llse, nnls, mmse, llsp]"
+    },
+    "num_trials": {
+      "type": "integer",
+      "default": 10,
+      "description": "Number of random trials for llse deconvolution"
+    },
+    "atlas": {
+      "type": "string",
+      "default": "/.mounts/labs/simpsonlab/users/jbroadbent/code/nanopore_cfdna/atlases/39Bisulfite.tsv",
+      "description": "Path to reference atlas for methylation deconvolution"
+    },
+    "guppy_model": {
+      "type": "string",
+      "default": "dna_r9.4.1_450bps_hac.cfg",
+      "description": "Basecaller model for guppy"
+    },
+    "guppy": {
+      "type": "string",
+      "default": "/.mounts/labs/ont/software/guppy-5.0.11/bin/guppy_basecaller",
+      "description": "Path to guppy installation"
+    },
+    "reference": {
+      "type": "string",
+      "default": "/.mounts/labs/simpsonlab/data/references/GRCh38_no_alt_analysis_set.GCA_000001405.15.fna",
+      "description": "Path to reference genome"
+    }
+  }
+}
